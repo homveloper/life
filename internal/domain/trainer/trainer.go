@@ -267,6 +267,7 @@ type Trainer struct {
 	Experience shared.Experience `json:"experience"`
 	Stats      shared.Stats      `json:"stats"`
 	Position   shared.Position   `json:"position"`
+	Movement   MovementState     `json:"movement"`
 	Money      shared.Money      `json:"money"`
 	Inventory  Inventory         `json:"inventory"`
 	Party      AnimalParty       `json:"party"`
@@ -279,7 +280,9 @@ func NewTrainer(userID UserID, nickname Nickname) (*Trainer, error) {
 	level, _ := shared.NewLevel(1)
 	experience, _ := shared.NewExperience(0, 0)
 	stats := shared.NewStats(100, 10, 5, 10, 10) // Starting stats
-	position := shared.NewPosition(15, 10)       // Center of 30x20 map
+	position := shared.NewPosition(15.0, 10.0)   // Center of 30x20 map
+	movement := NewMovementState()               // Initialize movement state
+	movement.StartPos = position                 // Set initial position
 	money, _ := shared.NewMoney(1000)            // Starting money
 	inventory := NewInventory(50)                // 50 inventory slots
 	party := NewAnimalParty(6)                   // Max 6 animals
@@ -292,6 +295,7 @@ func NewTrainer(userID UserID, nickname Nickname) (*Trainer, error) {
 		Experience: experience,
 		Stats:      stats,
 		Position:   position,
+		Movement:   movement,
 		Money:      money,
 		Inventory:  inventory,
 		Party:      party,
@@ -302,9 +306,38 @@ func NewTrainer(userID UserID, nickname Nickname) (*Trainer, error) {
 	return trainer, nil
 }
 
-// MoveTo moves the trainer to a new position
+// StartMovement starts movement in given direction
+func (t *Trainer) StartMovement(dirX, dirY float64) error {
+	// Update current position before starting new movement
+	t.UpdatePositionFromMovement()
+	
+	direction := MovementDirection{X: dirX, Y: dirY}
+	t.Movement.StartMovement(direction, t.Position)
+	t.UpdatedAt = shared.NewTimestamp()
+	
+	return nil
+}
+
+// StopMovement stops current movement
+func (t *Trainer) StopMovement() error {
+	// Update to final position
+	t.UpdatePositionFromMovement()
+	
+	t.Movement.StopMovement(t.Position)
+	t.UpdatedAt = shared.NewTimestamp()
+	
+	return nil
+}
+
+// UpdatePositionFromMovement updates position based on movement state
+func (t *Trainer) UpdatePositionFromMovement() {
+	t.Position = t.Movement.CalculateCurrentPosition()
+}
+
+// MoveTo moves the trainer to a new position (legacy support)
 func (t *Trainer) MoveTo(newPosition shared.Position) error {
-	// TODO: Add validation for valid positions when world is implemented
+	// Stop any current movement and set position directly
+	t.Movement.StopMovement(newPosition)
 	t.Position = newPosition
 	t.UpdatedAt = shared.NewTimestamp()
 

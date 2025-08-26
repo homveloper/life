@@ -21,9 +21,9 @@ import (
 
 // OAuthConfig holds OAuth provider configurations
 type OAuthConfig struct {
-	Google   ProviderConfig `json:"google"`
-	GitHub   ProviderConfig `json:"github"`
-	Discord  ProviderConfig `json:"discord"`
+	Google  ProviderConfig `json:"google"`
+	GitHub  ProviderConfig `json:"github"`
+	Discord ProviderConfig `json:"discord"`
 }
 
 // ProviderConfig represents OAuth provider configuration
@@ -108,6 +108,14 @@ type LinkSocialRequest struct {
 	State    string `json:"state"`
 }
 
+// LinkSocialResponse represents response after linking social account
+type LinkSocialResponse struct {
+	JWTToken  string `json:"jwt_token"`
+	UserID    string `json:"user_id"`
+	Provider  string `json:"provider"`
+	ExpiresIn int64  `json:"expires_in"`
+}
+
 // OAuthTokenResponse represents OAuth token response from provider
 type OAuthTokenResponse struct {
 	AccessToken string `json:"access_token"`
@@ -124,6 +132,16 @@ type UserProfile struct {
 }
 
 // HandleOAuthStart handles POST /api/v1/auth.OAuthStart
+// @Summary Start OAuth authentication flow
+// @Description Initiate OAuth authentication with a supported provider (google, github, discord)
+// @Tags authentication
+// @Accept json
+// @Produce json
+// @Param request body jsonrpcx.RequestT[OAuthStartRequest] true "JSON-RPC request with OAuthStartRequest params"
+// @Success 200 {object} jsonrpcx.ResponseT[OAuthStartResponse] "OAuth authorization URL"
+// @Failure 400 {object} jsonrpcx.ErrorResponse "Invalid request parameters"
+// @Failure 500 {object} jsonrpcx.ErrorResponse "Internal server error"
+// @Router /api/v1/auth.OAuthStart [post]
 func (h *AuthHandler) HandleOAuthStart(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		jsonrpcx.WithError(r, nil, jsonrpcx.MethodNotFound, "Method not allowed")
@@ -172,6 +190,16 @@ func (h *AuthHandler) HandleOAuthStart(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleOAuthCallback handles POST /api/v1/auth.OAuthCallback
+// @Summary Complete OAuth authentication flow
+// @Description Complete OAuth authentication with authorization code and receive JWT token
+// @Tags authentication
+// @Accept json
+// @Produce json
+// @Param request body jsonrpcx.RequestT[OAuthCallbackRequest] true "JSON-RPC request with OAuthCallbackRequest params"
+// @Success 200 {object} jsonrpcx.ResponseT[OAuthCallbackResponse] "JWT token and user information"
+// @Failure 400 {object} jsonrpcx.ErrorResponse "Invalid request parameters or authorization code"
+// @Failure 500 {object} jsonrpcx.ErrorResponse "Internal server error"
+// @Router /api/v1/auth.OAuthCallback [post]
 func (h *AuthHandler) HandleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		jsonrpcx.WithError(r, nil, jsonrpcx.MethodNotFound, "Method not allowed")
@@ -241,13 +269,23 @@ func (h *AuthHandler) HandleOAuthCallback(w http.ResponseWriter, r *http.Request
 		ExpiresIn: 86400, // 24 hours
 	}
 
-	h.logger.Info("User authenticated successfully", 
+	h.logger.Info("User authenticated successfully",
 		zap.String("userId", acc.UserID.String()),
 		zap.String("provider", string(provider)))
 	jsonrpcx.Success(w, req.ID, response)
 }
 
 // HandleGuestLogin handles guest login
+// @Summary Guest login with device ID
+// @Description Login as guest user using device identifier for immediate game access
+// @Tags authentication
+// @Accept json
+// @Produce json
+// @Param request body jsonrpcx.RequestT[GuestLoginRequest] true "JSON-RPC request with GuestLoginRequest params"
+// @Success 200 {object} jsonrpcx.ResponseT[GuestLoginResponse] "JWT token for guest user"
+// @Failure 400 {object} jsonrpcx.ErrorResponse "Invalid request parameters"
+// @Failure 500 {object} jsonrpcx.ErrorResponse "Internal server error"
+// @Router /api/v1/auth.GuestLogin [post]
 func (h *AuthHandler) HandleGuestLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		jsonrpcx.WithError(r, nil, jsonrpcx.MethodNotFound, "Method not allowed")
@@ -303,7 +341,7 @@ func (h *AuthHandler) HandleGuestLogin(w http.ResponseWriter, r *http.Request) {
 		}
 
 		guestAccount = newAccount
-		h.logger.Info("New guest account created", 
+		h.logger.Info("New guest account created",
 			zap.String("deviceId", params.DeviceID),
 			zap.String("userId", guestAccount.UserID.String()))
 	}
@@ -327,6 +365,19 @@ func (h *AuthHandler) HandleGuestLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleLinkSocial handles linking guest account to social provider
+// @Summary Link guest account to social provider
+// @Description Convert guest account to social account by linking with OAuth provider
+// @Tags authentication
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body jsonrpcx.RequestT[LinkSocialRequest] true "JSON-RPC request with LinkSocialRequest params"
+// @Success 200 {object} jsonrpcx.ResponseT[LinkSocialResponse] "Updated JWT token with social account"
+// @Failure 400 {object} jsonrpcx.ErrorResponse "Invalid request parameters"
+// @Failure 401 {object} jsonrpcx.ErrorResponse "Authentication required"
+// @Failure 403 {object} jsonrpcx.ErrorResponse "Not a guest account or already linked"
+// @Failure 500 {object} jsonrpcx.ErrorResponse "Internal server error"
+// @Router /api/v1/auth.LinkSocial [post]
 func (h *AuthHandler) HandleLinkSocial(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		jsonrpcx.WithError(r, nil, jsonrpcx.MethodNotFound, "Method not allowed")
@@ -429,7 +480,7 @@ func (h *AuthHandler) HandleLinkSocial(w http.ResponseWriter, r *http.Request) {
 		ExpiresIn: 86400,
 	}
 
-	h.logger.Info("Guest account linked to social provider", 
+	h.logger.Info("Guest account linked to social provider",
 		zap.String("userId", userID),
 		zap.String("provider", string(provider)))
 
@@ -474,14 +525,14 @@ func (h *AuthHandler) getOrCreateAccount(ctx context.Context, provider account.P
 		if err != nil {
 			return nil, err
 		}
-		
+
 		if existingByEmail != nil {
 			// Link to existing UserID (N:1 relationship)
 			h.logger.Info("Linking new provider to existing UserID",
 				zap.String("email", profile.Email),
 				zap.String("newProvider", string(provider)),
 				zap.String("existingUserID", existingByEmail.UserID.String()))
-				
+
 			newAccount, err = account.NewAccountWithUserID(provider, oauthProfile, existingByEmail.UserID)
 		} else {
 			// Create completely new account with new UserID
@@ -491,7 +542,7 @@ func (h *AuthHandler) getOrCreateAccount(ctx context.Context, provider account.P
 		// No email provided, create new account
 		newAccount, err = account.NewAccount(provider, oauthProfile)
 	}
-	
+
 	if err != nil {
 		return nil, err
 	}

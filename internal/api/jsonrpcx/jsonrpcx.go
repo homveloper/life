@@ -7,19 +7,42 @@ import (
 	"net/http"
 )
 
-// JSONRPCRequest represents a JSON-RPC 2.0 request
-type JSONRPCRequest struct {
-	JSONRPC string          `json:"jsonrpc"`
+// RequestT represents a typed JSON-RPC 2.0 request
+type RequestT[T any] struct {
+	JSONRPC string `json:"jsonrpc" example:"2.0"`
+	Method  string `json:"method"`
+	Params  T      `json:"params,omitempty"`
+	ID      any    `json:"id,omitempty"`
+}
+
+// ResponseT represents a typed JSON-RPC 2.0 response  
+type ResponseT[T any] struct {
+	JSONRPC string        `json:"jsonrpc" example:"2.0"`
+	Result  T             `json:"result,omitempty"`
+	Error   *JSONRPCError `json:"error,omitempty"`
+	ID      any           `json:"id,omitempty"`
+}
+
+// Request represents a JSON-RPC 2.0 request
+type Request struct {
+	JSONRPC string          `json:"jsonrpc" example:"2.0"`
 	Method  string          `json:"method"`
 	Params  json.RawMessage `json:"params,omitempty"`
 	ID      any             `json:"id,omitempty"`
 }
 
-// JSONRPCResponse represents a JSON-RPC 2.0 response
-type JSONRPCResponse struct {
-	JSONRPC string        `json:"jsonrpc"`
+// Response represents a JSON-RPC 2.0 response
+type Response struct {
+	JSONRPC string        `json:"jsonrpc" example:"2.0"`
 	Result  any           `json:"result,omitempty"`
 	Error   *JSONRPCError `json:"error,omitempty"`
+	ID      any           `json:"id,omitempty"`
+}
+
+// ErrorResponse represents a JSON-RPC 2.0 error response for Swagger
+type ErrorResponse struct {
+	JSONRPC string        `json:"jsonrpc" example:"2.0"`
+	Error   *JSONRPCError `json:"error"`
 	ID      any           `json:"id,omitempty"`
 }
 
@@ -40,14 +63,14 @@ const (
 )
 
 // ParseRequest parses JSON-RPC 2.0 request from HTTP request body
-func ParseRequest(r *http.Request) (*JSONRPCRequest, error) {
+func ParseRequest(r *http.Request) (*Request, error) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		return nil, err
 	}
 	defer r.Body.Close()
 
-	var req JSONRPCRequest
+	var req Request
 	if err := json.Unmarshal(body, &req); err != nil {
 		return nil, err
 	}
@@ -62,18 +85,18 @@ func ParseRequest(r *http.Request) (*JSONRPCRequest, error) {
 
 // Success sends a successful JSON-RPC 2.0 response
 func Success(w http.ResponseWriter, id any, result any) {
-	response := JSONRPCResponse{
+	response := Response{
 		JSONRPC: "2.0",
 		Result:  result,
 		ID:      id,
 	}
 
-	Response(w, response)
+	Write(w, response)
 }
 
 // WithError attaches an error to the request context for middleware processing
 func WithError(r *http.Request, id any, code int, message string) {
-	response := &JSONRPCResponse{
+	response := &Response{
 		JSONRPC: "2.0",
 		Error: &JSONRPCError{
 			Code:    code,
@@ -102,7 +125,7 @@ func NewErrorAdapter() ErrorAdapter {
 
 // SendError sends an error JSON-RPC 2.0 response (only accessible through ErrorAdapter)
 func (ea *errorAdapter) SendError(w http.ResponseWriter, id any, code int, message string) {
-	response := JSONRPCResponse{
+	response := Response{
 		JSONRPC: "2.0",
 		Error: &JSONRPCError{
 			Code:    code,
@@ -111,12 +134,12 @@ func (ea *errorAdapter) SendError(w http.ResponseWriter, id any, code int, messa
 		ID: id,
 	}
 
-	Response(w, response)
+	Write(w, response)
 }
 
 // SetError stores a JSON-RPC error in the request context for middleware processing
 func SetError(r *http.Request, id any, code int, message string) *http.Request {
-	response := &JSONRPCResponse{
+	response := &Response{
 		JSONRPC: "2.0",
 		Error: &JSONRPCError{
 			Code:    code,
@@ -129,8 +152,8 @@ func SetError(r *http.Request, id any, code int, message string) *http.Request {
 	return r.WithContext(ctx)
 }
 
-// Response sends a JSON-RPC 2.0 response (always HTTP 200)
-func Response(w http.ResponseWriter, response JSONRPCResponse) {
+// Write sends a JSON-RPC 2.0 response (always HTTP 200)
+func Write(w http.ResponseWriter, response Response) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK) // JSON-RPC always returns HTTP 200
 

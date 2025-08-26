@@ -1,3 +1,24 @@
+// @title LIFE Game Server API
+// @version 0.1.0
+// @description A multiplayer FPS game server with OAuth authentication and N:1 account linking
+// @termsOfService http://swagger.io/terms/
+
+// @contact.name API Support
+// @contact.url http://github.com/homveloper/life
+// @contact.email support@lifegame.com
+
+// @license.name MIT
+// @license.url https://github.com/homveloper/life/blob/main/LICENSE
+
+// @host localhost:8082
+// @BasePath /
+// @schemes http https
+
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+// @description Type "Bearer" followed by a space and JWT token.
+
 package main
 
 import (
@@ -10,6 +31,7 @@ import (
 
 	"go.uber.org/zap"
 
+	_ "github.com/danghamo/life/docs/api"
 	"github.com/danghamo/life/internal/api"
 	"github.com/danghamo/life/pkg/config"
 	"github.com/danghamo/life/pkg/redisx"

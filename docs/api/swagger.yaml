@@ -1,0 +1,835 @@
+basePath: /
+definitions:
+  github_com_danghamo_life_internal_api_jsonrpcx.ErrorResponse:
+    properties:
+      error:
+        $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.JSONRPCError'
+      id: {}
+      jsonrpc:
+        example: "2.0"
+        type: string
+    type: object
+  github_com_danghamo_life_internal_api_jsonrpcx.JSONRPCError:
+    properties:
+      code:
+        type: integer
+      data: {}
+      message:
+        type: string
+    type: object
+  github_com_danghamo_life_internal_api_jsonrpcx.RequestT-internal_api_handlers_CreateTrainerRequest:
+    properties:
+      id: {}
+      jsonrpc:
+        example: "2.0"
+        type: string
+      method:
+        type: string
+      params:
+        $ref: '#/definitions/internal_api_handlers.CreateTrainerRequest'
+    type: object
+  github_com_danghamo_life_internal_api_jsonrpcx.RequestT-internal_api_handlers_GetTrainerRequest:
+    properties:
+      id: {}
+      jsonrpc:
+        example: "2.0"
+        type: string
+      method:
+        type: string
+      params:
+        $ref: '#/definitions/internal_api_handlers.GetTrainerRequest'
+    type: object
+  github_com_danghamo_life_internal_api_jsonrpcx.RequestT-internal_api_handlers_GuestLoginRequest:
+    properties:
+      id: {}
+      jsonrpc:
+        example: "2.0"
+        type: string
+      method:
+        type: string
+      params:
+        $ref: '#/definitions/internal_api_handlers.GuestLoginRequest'
+    type: object
+  github_com_danghamo_life_internal_api_jsonrpcx.RequestT-internal_api_handlers_LinkSocialRequest:
+    properties:
+      id: {}
+      jsonrpc:
+        example: "2.0"
+        type: string
+      method:
+        type: string
+      params:
+        $ref: '#/definitions/internal_api_handlers.LinkSocialRequest'
+    type: object
+  github_com_danghamo_life_internal_api_jsonrpcx.RequestT-internal_api_handlers_ListTrainerRequest:
+    properties:
+      id: {}
+      jsonrpc:
+        example: "2.0"
+        type: string
+      method:
+        type: string
+      params:
+        $ref: '#/definitions/internal_api_handlers.ListTrainerRequest'
+    type: object
+  github_com_danghamo_life_internal_api_jsonrpcx.RequestT-internal_api_handlers_MoveTrainerRequest:
+    properties:
+      id: {}
+      jsonrpc:
+        example: "2.0"
+        type: string
+      method:
+        type: string
+      params:
+        $ref: '#/definitions/internal_api_handlers.MoveTrainerRequest'
+    type: object
+  github_com_danghamo_life_internal_api_jsonrpcx.RequestT-internal_api_handlers_OAuthCallbackRequest:
+    properties:
+      id: {}
+      jsonrpc:
+        example: "2.0"
+        type: string
+      method:
+        type: string
+      params:
+        $ref: '#/definitions/internal_api_handlers.OAuthCallbackRequest'
+    type: object
+  github_com_danghamo_life_internal_api_jsonrpcx.RequestT-internal_api_handlers_OAuthStartRequest:
+    properties:
+      id: {}
+      jsonrpc:
+        example: "2.0"
+        type: string
+      method:
+        type: string
+      params:
+        $ref: '#/definitions/internal_api_handlers.OAuthStartRequest'
+    type: object
+  github_com_danghamo_life_internal_api_jsonrpcx.ResponseT-internal_api_handlers_CreateTrainerResponse:
+    properties:
+      error:
+        $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.JSONRPCError'
+      id: {}
+      jsonrpc:
+        example: "2.0"
+        type: string
+      result:
+        $ref: '#/definitions/internal_api_handlers.CreateTrainerResponse'
+    type: object
+  github_com_danghamo_life_internal_api_jsonrpcx.ResponseT-internal_api_handlers_GetTrainerResponse:
+    properties:
+      error:
+        $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.JSONRPCError'
+      id: {}
+      jsonrpc:
+        example: "2.0"
+        type: string
+      result:
+        $ref: '#/definitions/internal_api_handlers.GetTrainerResponse'
+    type: object
+  github_com_danghamo_life_internal_api_jsonrpcx.ResponseT-internal_api_handlers_GuestLoginResponse:
+    properties:
+      error:
+        $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.JSONRPCError'
+      id: {}
+      jsonrpc:
+        example: "2.0"
+        type: string
+      result:
+        $ref: '#/definitions/internal_api_handlers.GuestLoginResponse'
+    type: object
+  github_com_danghamo_life_internal_api_jsonrpcx.ResponseT-internal_api_handlers_LinkSocialResponse:
+    properties:
+      error:
+        $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.JSONRPCError'
+      id: {}
+      jsonrpc:
+        example: "2.0"
+        type: string
+      result:
+        $ref: '#/definitions/internal_api_handlers.LinkSocialResponse'
+    type: object
+  github_com_danghamo_life_internal_api_jsonrpcx.ResponseT-internal_api_handlers_ListTrainerResponse:
+    properties:
+      error:
+        $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.JSONRPCError'
+      id: {}
+      jsonrpc:
+        example: "2.0"
+        type: string
+      result:
+        $ref: '#/definitions/internal_api_handlers.ListTrainerResponse'
+    type: object
+  github_com_danghamo_life_internal_api_jsonrpcx.ResponseT-internal_api_handlers_MoveTrainerResponse:
+    properties:
+      error:
+        $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.JSONRPCError'
+      id: {}
+      jsonrpc:
+        example: "2.0"
+        type: string
+      result:
+        $ref: '#/definitions/internal_api_handlers.MoveTrainerResponse'
+    type: object
+  github_com_danghamo_life_internal_api_jsonrpcx.ResponseT-internal_api_handlers_OAuthCallbackResponse:
+    properties:
+      error:
+        $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.JSONRPCError'
+      id: {}
+      jsonrpc:
+        example: "2.0"
+        type: string
+      result:
+        $ref: '#/definitions/internal_api_handlers.OAuthCallbackResponse'
+    type: object
+  github_com_danghamo_life_internal_api_jsonrpcx.ResponseT-internal_api_handlers_OAuthStartResponse:
+    properties:
+      error:
+        $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.JSONRPCError'
+      id: {}
+      jsonrpc:
+        example: "2.0"
+        type: string
+      result:
+        $ref: '#/definitions/internal_api_handlers.OAuthStartResponse'
+    type: object
+  github_com_danghamo_life_internal_api_jsonrpcx.ResponseT-internal_api_handlers_StatusTrainerResponse:
+    properties:
+      error:
+        $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.JSONRPCError'
+      id: {}
+      jsonrpc:
+        example: "2.0"
+        type: string
+      result:
+        $ref: '#/definitions/internal_api_handlers.StatusTrainerResponse'
+    type: object
+  github_com_danghamo_life_internal_domain_shared.Experience:
+    type: object
+  github_com_danghamo_life_internal_domain_shared.Level:
+    type: object
+  github_com_danghamo_life_internal_domain_shared.Money:
+    type: object
+  github_com_danghamo_life_internal_domain_shared.Position:
+    properties:
+      x:
+        type: integer
+      "y":
+        type: integer
+    type: object
+  github_com_danghamo_life_internal_domain_shared.Stats:
+    properties:
+      as:
+        description: Attack Speed
+        type: integer
+      atk:
+        description: Attack
+        type: integer
+      def:
+        description: Defense
+        type: integer
+      hp:
+        description: Health Points
+        type: integer
+      spd:
+        description: Speed (movement)
+        type: integer
+    type: object
+  github_com_danghamo_life_internal_domain_shared.Timestamp:
+    type: object
+  github_com_danghamo_life_internal_domain_trainer.AnimalParty:
+    type: object
+  github_com_danghamo_life_internal_domain_trainer.Inventory:
+    properties:
+      items:
+        additionalProperties:
+          $ref: '#/definitions/github_com_danghamo_life_internal_domain_trainer.Item'
+        description: itemID -> Item
+        type: object
+      max_slots:
+        type: integer
+    type: object
+  github_com_danghamo_life_internal_domain_trainer.Item:
+    properties:
+      created_at:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_shared.Timestamp'
+      id:
+        type: string
+      name:
+        type: string
+      type:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_trainer.ItemType'
+    type: object
+  github_com_danghamo_life_internal_domain_trainer.ItemType:
+    enum:
+    - health_potion
+    - mana_potion
+    - basic_net
+    - advanced_net
+    - master_net
+    - animal_hide
+    - rare_gem
+    - magic_crystal
+    type: string
+    x-enum-varnames:
+    - HealthPotion
+    - ManaPotion
+    - BasicNet
+    - AdvancedNet
+    - MasterNet
+    - AnimalHide
+    - RareGem
+    - MagicCrystal
+  github_com_danghamo_life_internal_domain_trainer.Nickname:
+    type: object
+  internal_api_handlers.CreateTrainerRequest:
+    properties:
+      nickname:
+        type: string
+    type: object
+  internal_api_handlers.CreateTrainerResponse:
+    properties:
+      created_at:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_shared.Timestamp'
+      experience:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_shared.Experience'
+      id:
+        description: UserID from Account domain
+        type: string
+      inventory:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_trainer.Inventory'
+      level:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_shared.Level'
+      money:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_shared.Money'
+      nickname:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_trainer.Nickname'
+      party:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_trainer.AnimalParty'
+      position:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_shared.Position'
+      stats:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_shared.Stats'
+      updated_at:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_shared.Timestamp'
+    type: object
+  internal_api_handlers.GetTrainerRequest:
+    type: object
+  internal_api_handlers.GetTrainerResponse:
+    properties:
+      created_at:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_shared.Timestamp'
+      experience:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_shared.Experience'
+      id:
+        description: UserID from Account domain
+        type: string
+      inventory:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_trainer.Inventory'
+      level:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_shared.Level'
+      money:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_shared.Money'
+      nickname:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_trainer.Nickname'
+      party:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_trainer.AnimalParty'
+      position:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_shared.Position'
+      stats:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_shared.Stats'
+      updated_at:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_shared.Timestamp'
+    type: object
+  internal_api_handlers.GuestLoginRequest:
+    properties:
+      device_id:
+        type: string
+    type: object
+  internal_api_handlers.GuestLoginResponse:
+    properties:
+      expires_in:
+        type: integer
+      is_guest:
+        type: boolean
+      jwt_token:
+        type: string
+      user_id:
+        type: string
+    type: object
+  internal_api_handlers.LinkSocialRequest:
+    properties:
+      code:
+        type: string
+      provider:
+        type: string
+      state:
+        type: string
+    type: object
+  internal_api_handlers.LinkSocialResponse:
+    properties:
+      expires_in:
+        type: integer
+      jwt_token:
+        type: string
+      provider:
+        type: string
+      user_id:
+        type: string
+    type: object
+  internal_api_handlers.ListTrainerRequest:
+    type: object
+  internal_api_handlers.ListTrainerResponse:
+    properties:
+      total:
+        type: integer
+      trainers:
+        items:
+          $ref: '#/definitions/internal_api_handlers.TrainerSummary'
+        type: array
+    type: object
+  internal_api_handlers.MoveTrainerRequest:
+    properties:
+      x:
+        type: integer
+      "y":
+        type: integer
+    type: object
+  internal_api_handlers.MoveTrainerResponse:
+    properties:
+      created_at:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_shared.Timestamp'
+      experience:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_shared.Experience'
+      id:
+        description: UserID from Account domain
+        type: string
+      inventory:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_trainer.Inventory'
+      level:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_shared.Level'
+      money:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_shared.Money'
+      nickname:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_trainer.Nickname'
+      party:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_trainer.AnimalParty'
+      position:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_shared.Position'
+      stats:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_shared.Stats'
+      updated_at:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_shared.Timestamp'
+    type: object
+  internal_api_handlers.OAuthCallbackRequest:
+    properties:
+      code:
+        type: string
+      provider:
+        type: string
+      state:
+        type: string
+    type: object
+  internal_api_handlers.OAuthCallbackResponse:
+    properties:
+      expires_in:
+        type: integer
+      jwt_token:
+        type: string
+      user_id:
+        type: string
+    type: object
+  internal_api_handlers.OAuthStartRequest:
+    properties:
+      provider:
+        type: string
+      state:
+        type: string
+    type: object
+  internal_api_handlers.OAuthStartResponse:
+    properties:
+      auth_url:
+        type: string
+      state:
+        type: string
+    type: object
+  internal_api_handlers.StatusTrainerResponse:
+    properties:
+      created_at:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_shared.Timestamp'
+      experience:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_shared.Experience'
+      id:
+        description: UserID from Account domain
+        type: string
+      inventory:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_trainer.Inventory'
+      level:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_shared.Level'
+      money:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_shared.Money'
+      nickname:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_trainer.Nickname'
+      party:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_trainer.AnimalParty'
+      position:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_shared.Position'
+      stats:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_shared.Stats'
+      updated_at:
+        $ref: '#/definitions/github_com_danghamo_life_internal_domain_shared.Timestamp'
+    type: object
+  internal_api_handlers.TrainerSummary:
+    properties:
+      id:
+        type: string
+      level:
+        type: integer
+      nickname:
+        type: string
+      position:
+        additionalProperties:
+          type: integer
+        type: object
+    type: object
+host: localhost:8082
+info:
+  contact:
+    email: support@lifegame.com
+    name: API Support
+    url: http://github.com/homveloper/life
+  description: A multiplayer FPS game server with OAuth authentication and N:1 account
+    linking
+  license:
+    name: MIT
+    url: https://github.com/homveloper/life/blob/main/LICENSE
+  termsOfService: http://swagger.io/terms/
+  title: LIFE Game Server API
+  version: 0.1.0
+paths:
+  /api/v1/auth.GuestLogin:
+    post:
+      consumes:
+      - application/json
+      description: Login as guest user using device identifier for immediate game
+        access
+      parameters:
+      - description: JSON-RPC request with GuestLoginRequest params
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.RequestT-internal_api_handlers_GuestLoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: JWT token for guest user
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ResponseT-internal_api_handlers_GuestLoginResponse'
+        "400":
+          description: Invalid request parameters
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ErrorResponse'
+      summary: Guest login with device ID
+      tags:
+      - authentication
+  /api/v1/auth.LinkSocial:
+    post:
+      consumes:
+      - application/json
+      description: Convert guest account to social account by linking with OAuth provider
+      parameters:
+      - description: JSON-RPC request with LinkSocialRequest params
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.RequestT-internal_api_handlers_LinkSocialRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Updated JWT token with social account
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ResponseT-internal_api_handlers_LinkSocialResponse'
+        "400":
+          description: Invalid request parameters
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ErrorResponse'
+        "401":
+          description: Authentication required
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ErrorResponse'
+        "403":
+          description: Not a guest account or already linked
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Link guest account to social provider
+      tags:
+      - authentication
+  /api/v1/auth.OAuthCallback:
+    post:
+      consumes:
+      - application/json
+      description: Complete OAuth authentication with authorization code and receive
+        JWT token
+      parameters:
+      - description: JSON-RPC request with OAuthCallbackRequest params
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.RequestT-internal_api_handlers_OAuthCallbackRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: JWT token and user information
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ResponseT-internal_api_handlers_OAuthCallbackResponse'
+        "400":
+          description: Invalid request parameters or authorization code
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ErrorResponse'
+      summary: Complete OAuth authentication flow
+      tags:
+      - authentication
+  /api/v1/auth.OAuthStart:
+    post:
+      consumes:
+      - application/json
+      description: Initiate OAuth authentication with a supported provider (google,
+        github, discord)
+      parameters:
+      - description: JSON-RPC request with OAuthStartRequest params
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.RequestT-internal_api_handlers_OAuthStartRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OAuth authorization URL
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ResponseT-internal_api_handlers_OAuthStartResponse'
+        "400":
+          description: Invalid request parameters
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ErrorResponse'
+      summary: Start OAuth authentication flow
+      tags:
+      - authentication
+  /api/v1/trainer.Create:
+    post:
+      consumes:
+      - application/json
+      description: Create a new trainer with nickname for the authenticated user
+      parameters:
+      - description: JSON-RPC request with CreateTrainerRequest params
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.RequestT-internal_api_handlers_CreateTrainerRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Created trainer information
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ResponseT-internal_api_handlers_CreateTrainerResponse'
+        "400":
+          description: Invalid request parameters
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ErrorResponse'
+        "401":
+          description: Authentication required
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create a new trainer
+      tags:
+      - trainer
+  /api/v1/trainer.Get:
+    post:
+      consumes:
+      - application/json
+      description: Get trainer information for the authenticated user (auto-creates
+        if not exists)
+      parameters:
+      - description: JSON-RPC request with GetTrainerRequest params
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.RequestT-internal_api_handlers_GetTrainerRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Trainer information
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ResponseT-internal_api_handlers_GetTrainerResponse'
+        "400":
+          description: Invalid request parameters
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ErrorResponse'
+        "401":
+          description: Authentication required
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get trainer information
+      tags:
+      - trainer
+  /api/v1/trainer.List:
+    post:
+      consumes:
+      - application/json
+      description: Get a list of all trainers in the game world (currently returns
+        mock data)
+      parameters:
+      - description: JSON-RPC request with ListTrainerRequest params
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.RequestT-internal_api_handlers_ListTrainerRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of trainers
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ResponseT-internal_api_handlers_ListTrainerResponse'
+        "400":
+          description: Invalid request parameters
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ErrorResponse'
+        "401":
+          description: Authentication required
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List all trainers
+      tags:
+      - trainer
+  /api/v1/trainer.Move:
+    post:
+      consumes:
+      - application/json
+      description: Move trainer to a new position on the game map with coordinate
+        validation
+      parameters:
+      - description: JSON-RPC request with MoveTrainerRequest params
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.RequestT-internal_api_handlers_MoveTrainerRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Updated trainer with new position
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ResponseT-internal_api_handlers_MoveTrainerResponse'
+        "400":
+          description: Invalid request parameters or invalid coordinates
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ErrorResponse'
+        "401":
+          description: Authentication required
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Move trainer to new position
+      tags:
+      - trainer
+  /api/v1/trainer.Status:
+    post:
+      consumes:
+      - application/json
+      description: Get detailed status information for the authenticated trainer
+      parameters:
+      - description: JSON-RPC request with GetTrainerRequest params
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.RequestT-internal_api_handlers_GetTrainerRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Trainer status information
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ResponseT-internal_api_handlers_StatusTrainerResponse'
+        "400":
+          description: Invalid request parameters
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ErrorResponse'
+        "401":
+          description: Authentication required
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/github_com_danghamo_life_internal_api_jsonrpcx.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get trainer status
+      tags:
+      - trainer
+schemes:
+- http
+- https
+securityDefinitions:
+  BearerAuth:
+    description: Type "Bearer" followed by a space and JWT token.
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

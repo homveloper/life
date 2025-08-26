@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	httpSwagger "github.com/swaggo/http-swagger"
 
 	"github.com/danghamo/life/internal/api/handlers"
 	"github.com/danghamo/life/internal/api/jsonrpcx"
@@ -117,6 +118,9 @@ func NewServer(config ServerConfig, logger *logger.Logger, redisClient *redisx.C
 func (s *Server) setupRoutes() {
 	// Health check endpoint (pure REST)
 	s.mux.HandleFunc("/health", s.healthCheckHandler)
+
+	// Swagger documentation endpoint
+	s.mux.HandleFunc("/swagger/", httpSwagger.WrapHandler)
 
 	// General purpose ping endpoint (hybrid)
 	s.mux.HandleFunc("/api/v1/ping", s.handlePing)

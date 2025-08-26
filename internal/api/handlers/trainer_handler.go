@@ -5,13 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/danghamo/life/internal/api/jsonrpcx"
 	"github.com/danghamo/life/internal/api/middleware"
-	"github.com/danghamo/life/internal/domain/shared"
 	"github.com/danghamo/life/internal/domain/trainer"
 	"github.com/danghamo/life/pkg/logger"
 )
@@ -25,24 +23,24 @@ type TrainerHandler struct {
 // getOrCreateTrainer gets an existing trainer or creates a default one for the user
 func (h *TrainerHandler) getOrCreateTrainer(ctx context.Context, userID string, defaultNickname string) (*trainer.Trainer, error) {
 	trainerUserID := trainer.UserID(userID)
-	
+
 	// Try to get existing trainer
 	existing, err := h.repository.GetByID(ctx, trainerUserID)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	if existing != nil {
 		return existing, nil
 	}
-	
+
 	// Create new trainer with default nickname
 	nickname, err := trainer.NewNickname(defaultNickname)
 	if err != nil {
 		// If default nickname fails, use a fallback
 		nickname, _ = trainer.NewNickname("Player" + userID[:8])
 	}
-	
+
 	var newTrainer *trainer.Trainer
 	err = h.repository.FindOneAndInsert(ctx, trainerUserID, func() (*trainer.Trainer, error) {
 		return trainer.NewTrainer(trainerUserID, nickname)
@@ -50,17 +48,17 @@ func (h *TrainerHandler) getOrCreateTrainer(ctx context.Context, userID string, 
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Get the created trainer
 	newTrainer, err = h.repository.GetByID(ctx, trainerUserID)
 	if err != nil {
 		return nil, err
 	}
-	
-	h.logger.Info("Auto-created trainer for new user", 
+
+	h.logger.Info("Auto-created trainer for new user",
 		zap.String("userId", userID),
 		zap.String("nickname", nickname.Value()))
-	
+
 	return newTrainer, nil
 }
 
@@ -73,20 +71,55 @@ func NewTrainerHandler(logger *logger.Logger, repository trainer.Repository) *Tr
 }
 
 // Request parameter structures
-type CreateTrainerParams struct {
+type CreateTrainerRequest struct {
 	Nickname string `json:"nickname"`
 }
 
-type GetTrainerParams struct {
+type GetTrainerRequest struct {
 	// No ID needed - we get it from JWT context
 }
 
-type MoveTrainerParams struct {
-	X int `json:"x"`
-	Y int `json:"y"`
+type MoveTrainerRequest struct {
+	DirectionX float64 `json:"direction_x"` // -1, 0, or 1
+	DirectionY float64 `json:"direction_y"` // -1, 0, or 1
+	Action     string  `json:"action"`     // "start" or "stop"
+}
+
+type ListTrainerRequest struct {
+	// No params needed for list
+}
+
+// Response structures for Swagger documentation
+type CreateTrainerResponse = trainer.Trainer
+type GetTrainerResponse = trainer.Trainer
+type MoveTrainerResponse = trainer.Trainer
+type StatusTrainerResponse = trainer.Trainer
+
+type ListTrainerResponse struct {
+	Trainers []TrainerSummary `json:"trainers"`
+	Total    int              `json:"total"`
+}
+
+type TrainerSummary struct {
+	ID       string         `json:"id"`
+	Nickname string         `json:"nickname"`
+	Level    int            `json:"level"`
+	Position map[string]int `json:"position"`
 }
 
 // HandleCreate handles POST /api/v1/trainer.Create
+// @Summary Create a new trainer
+// @Description Create a new trainer with nickname for the authenticated user
+// @Tags trainer
+// @Accept json
+// @Produce json
+// @Param request body jsonrpcx.RequestT[CreateTrainerRequest] true "JSON-RPC request with CreateTrainerRequest params"
+// @Success 200 {object} jsonrpcx.ResponseT[CreateTrainerResponse] "Created trainer information"
+// @Failure 400 {object} jsonrpcx.ErrorResponse "Invalid request parameters"
+// @Failure 401 {object} jsonrpcx.ErrorResponse "Authentication required"
+// @Failure 500 {object} jsonrpcx.ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /api/v1/trainer.Create [post]
 func (h *TrainerHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		jsonrpcx.WithError(r, nil, jsonrpcx.MethodNotFound, "Method not allowed")
@@ -106,7 +139,7 @@ func (h *TrainerHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var params CreateTrainerParams
+	var params CreateTrainerRequest
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		jsonrpcx.WithError(r, req.ID, jsonrpcx.InvalidParams, "Invalid params")
 		return
@@ -139,7 +172,7 @@ func (h *TrainerHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 
 	result := createdTrainer
 
-	h.logger.Info("Trainer created successfully", 
+	h.logger.Info("Trainer created successfully",
 		zap.String("userId", userID),
 		zap.String("nickname", createdTrainer.Nickname.Value()))
 
@@ -147,6 +180,18 @@ func (h *TrainerHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleGet handles POST /api/v1/trainer.Get
+// @Summary Get trainer information
+// @Description Get trainer information for the authenticated user (auto-creates if not exists)
+// @Tags trainer
+// @Accept json
+// @Produce json
+// @Param request body jsonrpcx.RequestT[GetTrainerRequest] true "JSON-RPC request with GetTrainerRequest params"
+// @Success 200 {object} jsonrpcx.ResponseT[GetTrainerResponse] "Trainer information"
+// @Failure 400 {object} jsonrpcx.ErrorResponse "Invalid request parameters"
+// @Failure 401 {object} jsonrpcx.ErrorResponse "Authentication required"
+// @Failure 500 {object} jsonrpcx.ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /api/v1/trainer.Get [post]
 func (h *TrainerHandler) HandleGet(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		jsonrpcx.WithError(r, nil, jsonrpcx.MethodNotFound, "Method not allowed")
@@ -166,7 +211,7 @@ func (h *TrainerHandler) HandleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var params GetTrainerParams
+	var params GetTrainerRequest
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		jsonrpcx.WithError(r, req.ID, jsonrpcx.InvalidParams, "Invalid params")
 		return
@@ -185,6 +230,18 @@ func (h *TrainerHandler) HandleGet(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleMove handles POST /api/v1/trainer.Move
+// @Summary Move trainer to new position
+// @Description Move trainer to a new position on the game map with coordinate validation
+// @Tags trainer
+// @Accept json
+// @Produce json
+// @Param request body jsonrpcx.RequestT[MoveTrainerRequest] true "JSON-RPC request with MoveTrainerRequest params"
+// @Success 200 {object} jsonrpcx.ResponseT[MoveTrainerResponse] "Updated trainer with new position"
+// @Failure 400 {object} jsonrpcx.ErrorResponse "Invalid request parameters or invalid coordinates"
+// @Failure 401 {object} jsonrpcx.ErrorResponse "Authentication required"
+// @Failure 500 {object} jsonrpcx.ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /api/v1/trainer.Move [post]
 func (h *TrainerHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		jsonrpcx.WithError(r, nil, jsonrpcx.MethodNotFound, "Method not allowed")
@@ -204,14 +261,14 @@ func (h *TrainerHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var params MoveTrainerParams
+	var params MoveTrainerRequest
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		jsonrpcx.WithError(r, req.ID, jsonrpcx.InvalidParams, "Invalid params")
 		return
 	}
 
-	// Movement validation
-	if err := h.validateMovement(params.X, params.Y); err != nil {
+	// Validate direction
+	if err := h.validateDirection(params.DirectionX, params.DirectionY); err != nil {
 		jsonrpcx.WithError(r, req.ID, jsonrpcx.InvalidParams, err.Error())
 		return
 	}
@@ -223,8 +280,7 @@ func (h *TrainerHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update trainer position using repository
-	newPosition := shared.NewPosition(params.X, params.Y)
+	// Handle movement command
 	var updatedTrainer *trainer.Trainer
 	trainerUserID := trainer.UserID(userID)
 
@@ -233,9 +289,20 @@ func (h *TrainerHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 			return nil, fmt.Errorf("trainer not found")
 		}
 
-		// Move the trainer
-		if err := t.MoveTo(newPosition); err != nil {
-			return nil, err
+		// Update position from current movement before new command
+		t.UpdatePositionFromMovement()
+
+		// Handle movement action
+		if params.Action == "start" {
+			if err := t.StartMovement(params.DirectionX, params.DirectionY); err != nil {
+				return nil, err
+			}
+		} else if params.Action == "stop" {
+			if err := t.StopMovement(); err != nil {
+				return nil, err
+			}
+		} else {
+			return nil, fmt.Errorf("invalid action: %s (must be 'start' or 'stop')", params.Action)
 		}
 
 		updatedTrainer = t
@@ -249,16 +316,31 @@ func (h *TrainerHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 
 	result := updatedTrainer
 
-	h.logger.Info("Trainer movement",
+	h.logger.Info("Trainer movement command",
 		zap.String("userId", userID),
-		zap.Int("newX", updatedTrainer.Position.X),
-		zap.Int("newY", updatedTrainer.Position.Y),
-		zap.String("timestamp", time.Now().UTC().Format(time.RFC3339)))
+		zap.String("action", params.Action),
+		zap.Float64("directionX", params.DirectionX),
+		zap.Float64("directionY", params.DirectionY),
+		zap.Float64("currentX", updatedTrainer.Position.X),
+		zap.Float64("currentY", updatedTrainer.Position.Y),
+		zap.Bool("isMoving", updatedTrainer.Movement.IsMoving))
 
 	jsonrpcx.Success(w, req.ID, result)
 }
 
 // HandleList handles POST /api/v1/trainer.List
+// @Summary List all trainers
+// @Description Get a list of all trainers in the game world (currently returns mock data)
+// @Tags trainer
+// @Accept json
+// @Produce json
+// @Param request body jsonrpcx.RequestT[ListTrainerRequest] true "JSON-RPC request with ListTrainerRequest params"
+// @Success 200 {object} jsonrpcx.ResponseT[ListTrainerResponse] "List of trainers"
+// @Failure 400 {object} jsonrpcx.ErrorResponse "Invalid request parameters"
+// @Failure 401 {object} jsonrpcx.ErrorResponse "Authentication required"
+// @Failure 500 {object} jsonrpcx.ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /api/v1/trainer.List [post]
 func (h *TrainerHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		jsonrpcx.WithError(r, nil, jsonrpcx.MethodNotFound, "Method not allowed")
@@ -295,6 +377,18 @@ func (h *TrainerHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleStatus handles POST /api/v1/trainer.Status
+// @Summary Get trainer status
+// @Description Get detailed status information for the authenticated trainer
+// @Tags trainer
+// @Accept json
+// @Produce json
+// @Param request body jsonrpcx.RequestT[GetTrainerRequest] true "JSON-RPC request with GetTrainerRequest params"
+// @Success 200 {object} jsonrpcx.ResponseT[StatusTrainerResponse] "Trainer status information"
+// @Failure 400 {object} jsonrpcx.ErrorResponse "Invalid request parameters"
+// @Failure 401 {object} jsonrpcx.ErrorResponse "Authentication required"
+// @Failure 500 {object} jsonrpcx.ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /api/v1/trainer.Status [post]
 func (h *TrainerHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		jsonrpcx.WithError(r, nil, jsonrpcx.MethodNotFound, "Method not allowed")
@@ -314,7 +408,7 @@ func (h *TrainerHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var params GetTrainerParams
+	var params GetTrainerRequest
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		jsonrpcx.WithError(r, req.ID, jsonrpcx.InvalidParams, "Invalid params")
 		return
@@ -332,28 +426,60 @@ func (h *TrainerHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	jsonrpcx.Success(w, req.ID, result)
 }
 
+// validateDirection validates movement direction values
+func (h *TrainerHandler) validateDirection(dirX, dirY float64) error {
+	// Direction values must be -1, 0, or 1
+	validValues := []float64{-1, 0, 1}
+	
+	isValidX := false
+	for _, v := range validValues {
+		if dirX == v {
+			isValidX = true
+			break
+		}
+	}
+	
+	isValidY := false
+	for _, v := range validValues {
+		if dirY == v {
+			isValidY = true
+			break
+		}
+	}
+	
+	if !isValidX {
+		return fmt.Errorf("invalid direction_x: %f (must be -1, 0, or 1)", dirX)
+	}
+	
+	if !isValidY {
+		return fmt.Errorf("invalid direction_y: %f (must be -1, 0, or 1)", dirY)
+	}
+	
+	return nil
+}
+
 // validateMovement validates trainer movement coordinates
-func (h *TrainerHandler) validateMovement(x, y int) error {
+func (h *TrainerHandler) validateMovement(x, y float64) error {
 	// Map boundaries validation (assuming 30x20 map from world handler)
 	const maxX, maxY = 30, 20
 
 	if x < 0 || x >= maxX {
-		return fmt.Errorf("invalid X coordinate: %d (must be 0-%d)", x, maxX-1)
+		return fmt.Errorf("invalid X coordinate: %f (must be 0-%d)", x, maxX-1)
 	}
 
 	if y < 0 || y >= maxY {
-		return fmt.Errorf("invalid Y coordinate: %d (must be 0-%d)", y, maxY-1)
+		return fmt.Errorf("invalid Y coordinate: %f (must be 0-%d)", y, maxY-1)
 	}
 
 	// TODO: Add obstacle checking logic from world data
 	// For now, just check for basic water tiles at specific coordinates
-	waterTiles := []struct{ x, y int }{
+	waterTiles := []struct{ x, y float64 }{
 		{2, 0}, {0, 2}, // From world handler mock data
 	}
 
 	for _, tile := range waterTiles {
 		if x == tile.x && y == tile.y {
-			return fmt.Errorf("cannot move to water tile at (%d, %d)", x, y)
+			return fmt.Errorf("cannot move to water tile at (%f, %f)", x, y)
 		}
 	}
 

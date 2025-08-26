@@ -189,7 +189,7 @@ func (r *RedisRepository) GetByID(ctx context.Context, id AnimalID) (*Animal, er
 
 // GetByPosition retrieves wild animals at a specific position
 func (r *RedisRepository) GetByPosition(ctx context.Context, position shared.Position) ([]*Animal, error) {
-	indexKey := fmt.Sprintf("idx:animal:wild_position:%d:%d", position.X, position.Y)
+	indexKey := fmt.Sprintf("idx:animal:wild_position:%.1f:%.1f", position.X, position.Y)
 
 	ids, err := r.client.SMembers(ctx, indexKey).Result()
 	if err != nil {
@@ -211,7 +211,7 @@ func (r *RedisRepository) GetByPosition(ctx context.Context, position shared.Pos
 }
 
 // GetWildAnimalsNearby retrieves wild animals within radius from position
-func (r *RedisRepository) GetWildAnimalsNearby(ctx context.Context, center shared.Position, radius int) ([]*Animal, error) {
+func (r *RedisRepository) GetWildAnimalsNearby(ctx context.Context, center shared.Position, radius float64) ([]*Animal, error) {
 	var animals []*Animal
 
 	// Simple implementation: check positions within square radius
@@ -354,7 +354,7 @@ func (r *RedisRepository) deserializeAnimal(fields map[string]string, a *Animal)
 func (r *RedisRepository) updateAnimalIndices(ctx context.Context, pipe redis.Pipeliner, a *Animal) {
 	// Position index (only for wild animals)
 	if a.IsWild() {
-		positionKey := fmt.Sprintf("idx:animal:wild_position:%d:%d", a.Position.X, a.Position.Y)
+		positionKey := fmt.Sprintf("idx:animal:wild_position:%.1f:%.1f", a.Position.X, a.Position.Y)
 		pipe.SAdd(ctx, positionKey, a.ID.String())
 	}
 
@@ -377,7 +377,7 @@ func (r *RedisRepository) updateAnimalIndices(ctx context.Context, pipe redis.Pi
 func (r *RedisRepository) cleanupAnimalIndices(ctx context.Context, pipe redis.Pipeliner, a *Animal) {
 	// Position index
 	if a.IsWild() {
-		positionKey := fmt.Sprintf("idx:animal:wild_position:%d:%d", a.Position.X, a.Position.Y)
+		positionKey := fmt.Sprintf("idx:animal:wild_position:%.1f:%.1f", a.Position.X, a.Position.Y)
 		pipe.SRem(ctx, positionKey, a.ID.String())
 	}
 

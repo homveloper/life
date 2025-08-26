@@ -111,8 +111,8 @@ func ErrorAdapter(logger *logger.Logger) Middleware {
 			next.ServeHTTP(w, r)
 
 			// Check if there's a JSON-RPC error in the context
-			if rpcResponse, ok := r.Context().Value("jsonrpc_error").(*jsonrpcx.JSONRPCResponse); ok {
-				jsonrpcx.Response(w, *rpcResponse)
+			if rpcResponse, ok := r.Context().Value("jsonrpc_error").(*jsonrpcx.Response); ok {
+				jsonrpcx.Write(w, *rpcResponse)
 				return
 			}
 

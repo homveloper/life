@@ -26,38 +26,42 @@ func (id ID) IsEmpty() bool {
 }
 
 // Position represents a 2D coordinate
+// DESIGN DECISION: Uses float64 for free-form movement (not grid-based)
+// - 1 unit = abstract game unit, independent of pixels or tiles  
+// - Allows smooth movement like Position{X: 245.7, Y: 182.3}
+// - Tiles are separate concept with position and size for collision/terrain
 type Position struct {
-	X int `json:"x"`
-	Y int `json:"y"`
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
 }
 
 // NewPosition creates a new position
-func NewPosition(x, y int) Position {
+func NewPosition(x, y float64) Position {
 	return Position{X: x, Y: y}
 }
 
 // DistanceTo calculates the distance to another position
 func (p Position) DistanceTo(other Position) float64 {
-	dx := float64(p.X - other.X)
-	dy := float64(p.Y - other.Y)
+	dx := p.X - other.X
+	dy := p.Y - other.Y
 	return dx*dx + dy*dy // Using squared distance for performance
 }
 
-// IsAdjacent checks if this position is adjacent to another
+// IsAdjacent checks if this position is adjacent to another (within 1 unit)
 func (p Position) IsAdjacent(other Position) bool {
 	dx := p.X - other.X
 	dy := p.Y - other.Y
-	return (dx >= -1 && dx <= 1) && (dy >= -1 && dy <= 1) && !(dx == 0 && dy == 0)
+	return (dx >= -1.0 && dx <= 1.0) && (dy >= -1.0 && dy <= 1.0) && !(dx == 0 && dy == 0)
 }
 
 // String returns string representation of position
 func (p Position) String() string {
-	return fmt.Sprintf("(%d,%d)", p.X, p.Y)
+	return fmt.Sprintf("(%.1f,%.1f)", p.X, p.Y)
 }
 
 // Key returns a string key for map indexing
 func (p Position) Key() string {
-	return fmt.Sprintf("%d,%d", p.X, p.Y)
+	return fmt.Sprintf("%.1f,%.1f", p.X, p.Y)
 }
 
 // Stats represents game statistics

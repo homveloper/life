@@ -27,7 +27,7 @@ type Repository interface {
 	GetByOwner(ctx context.Context, ownerID shared.ID) ([]*Animal, error)
 
 	// GetWildAnimalsNearby retrieves wild animals within radius from position (read-only)
-	GetWildAnimalsNearby(ctx context.Context, center shared.Position, radius int) ([]*Animal, error)
+	GetWildAnimalsNearby(ctx context.Context, center shared.Position, radius float64) ([]*Animal, error)
 
 	// Delete removes an animal
 	Delete(ctx context.Context, id AnimalID) error

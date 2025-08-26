@@ -189,7 +189,7 @@ func (r *RedisRepository) GetByID(ctx context.Context, id UserID) (*Trainer, err
 
 // GetByPosition retrieves trainers at a specific position
 func (r *RedisRepository) GetByPosition(ctx context.Context, position shared.Position) ([]*Trainer, error) {
-	indexKey := fmt.Sprintf("idx:trainer:position:%d:%d", position.X, position.Y)
+	indexKey := fmt.Sprintf("idx:trainer:position:%.1f:%.1f", position.X, position.Y)
 
 	ids, err := r.client.SMembers(ctx, indexKey).Result()
 	if err != nil {
@@ -280,7 +280,7 @@ func (r *RedisRepository) deserializeTrainer(fields map[string]string, t *Traine
 // updateTrainerIndices updates secondary indices
 func (r *RedisRepository) updateTrainerIndices(ctx context.Context, pipe redis.Pipeliner, t *Trainer) {
 	// Position index
-	positionKey := fmt.Sprintf("idx:trainer:position:%d:%d", t.Position.X, t.Position.Y)
+	positionKey := fmt.Sprintf("idx:trainer:position:%.1f:%.1f", t.Position.X, t.Position.Y)
 	pipe.SAdd(ctx, positionKey, t.ID.String())
 
 	// Nickname index
@@ -291,7 +291,7 @@ func (r *RedisRepository) updateTrainerIndices(ctx context.Context, pipe redis.P
 // cleanupTrainerIndices cleans up secondary indices
 func (r *RedisRepository) cleanupTrainerIndices(ctx context.Context, pipe redis.Pipeliner, t *Trainer) {
 	// Position index
-	positionKey := fmt.Sprintf("idx:trainer:position:%d:%d", t.Position.X, t.Position.Y)
+	positionKey := fmt.Sprintf("idx:trainer:position:%.1f:%.1f", t.Position.X, t.Position.Y)
 	pipe.SRem(ctx, positionKey, t.ID.String())
 
 	// Nickname index

@@ -159,7 +159,7 @@ func NewWorld(name string, width, height int) (*World, error) {
 func (w *World) generateDefaultTerrain() {
 	for x := 0; x < w.Width; x++ {
 		for y := 0; y < w.Height; y++ {
-			position := shared.NewPosition(x, y)
+			position := shared.NewPosition(float64(x), float64(y))
 
 			// Simple terrain generation for MVP
 			var terrain TerrainType
@@ -200,7 +200,7 @@ func (w *World) GetTile(position shared.Position) (*Tile, error) {
 
 // IsValidPosition checks if position is within world boundaries
 func (w *World) IsValidPosition(position shared.Position) bool {
-	return position.X >= 0 && position.X < w.Width && position.Y >= 0 && position.Y < w.Height
+	return position.X >= 0 && position.X < float64(w.Width) && position.Y >= 0 && position.Y < float64(w.Height)
 }
 
 // IsWalkablePosition checks if position is walkable
@@ -264,7 +264,7 @@ func (w *World) GetNeighbors(position shared.Position) []shared.Position {
 				continue // Skip current position
 			}
 
-			neighborPos := shared.NewPosition(position.X+dx, position.Y+dy)
+			neighborPos := shared.NewPosition(position.X+float64(dx), position.Y+float64(dy))
 			if w.IsWalkablePosition(neighborPos) {
 				neighbors = append(neighbors, neighborPos)
 			}
