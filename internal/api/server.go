@@ -4,18 +4,25 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
-	"go.uber.org/zap"
+	"github.com/ThreeDotsLabs/watermill"
+	"github.com/ThreeDotsLabs/watermill-redisstream/pkg/redisstream"
+	"github.com/ThreeDotsLabs/watermill/components/cqrs"
+	"github.com/ThreeDotsLabs/watermill/message"
 	httpSwagger "github.com/swaggo/http-swagger"
+	"go.uber.org/zap"
 
 	"github.com/danghamo/life/internal/api/handlers"
 	"github.com/danghamo/life/internal/api/jsonrpcx"
 	"github.com/danghamo/life/internal/api/middleware"
+	cqrshandlers "github.com/danghamo/life/internal/cqrs/handlers"
 	"github.com/danghamo/life/internal/domain/account"
 	"github.com/danghamo/life/internal/domain/trainer"
 	"github.com/danghamo/life/pkg/logger"
 	"github.com/danghamo/life/pkg/redisx"
+	"github.com/danghamo/life/pkg/sse"
 )
 
 // Server represents the HTTP server
@@ -28,7 +35,16 @@ type Server struct {
 	animalHandler  *handlers.AnimalHandler
 	worldHandler   *handlers.WorldHandler
 	authHandler    *handlers.AuthHandler
+	serverHandler  *handlers.ServerHandler
 	authMiddleware *middleware.AuthMiddleware
+	sseBroadcaster *sse.SSEBroadcaster
+	// Watermill CQRS components
+	commandBus       *cqrs.CommandBus
+	eventBus         *cqrs.EventBus
+	commandProcessor *cqrs.CommandProcessor
+	eventProcessor   *cqrs.EventProcessor
+	router          *message.Router
+	sseEventHandler *cqrshandlers.SSEEventHandler
 }
 
 // ServerConfig holds server configuration
@@ -90,6 +106,122 @@ func NewServer(config ServerConfig, logger *logger.Logger, redisClient *redisx.C
 		},
 	}
 
+	// Generate unique server ID
+	hostname, _ := os.Hostname()
+	if hostname == "" {
+		hostname = "unknown"
+	}
+	serverID := fmt.Sprintf("%s-%d", hostname, time.Now().UnixNano())
+
+	// Create Watermill logger
+	watermillLogger := watermill.NewStdLogger(false, false)
+
+	// Create Redis publisher and subscriber
+	publisher, err := redisstream.NewPublisher(
+		redisstream.PublisherConfig{
+			Client: redisClient.Client,
+		},
+		watermillLogger,
+	)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to create publisher: %v", err))
+	}
+
+	subscriber, err := redisstream.NewSubscriber(
+		redisstream.SubscriberConfig{
+			Client:        redisClient.Client,
+			ConsumerGroup: fmt.Sprintf("game-server-%s", serverID),
+		},
+		watermillLogger,
+	)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to create subscriber: %v", err))
+	}
+
+	// Create message router with short close timeout
+	router, err := message.NewRouter(message.RouterConfig{
+		CloseTimeout: 5 * time.Second, // Short timeout for graceful shutdown
+	}, watermillLogger)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to create router: %v", err))
+	}
+
+	// Create command bus
+	commandBus, err := cqrs.NewCommandBusWithConfig(
+		publisher,
+		cqrs.CommandBusConfig{
+			GeneratePublishTopic: func(params cqrs.CommandBusGeneratePublishTopicParams) (string, error) {
+				return fmt.Sprintf("game-commands.%s", params.CommandName), nil
+			},
+			Marshaler: cqrs.JSONMarshaler{},
+			Logger:    watermillLogger,
+		},
+	)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to create command bus: %v", err))
+	}
+
+	// Create event bus
+	eventBus, err := cqrs.NewEventBusWithConfig(
+		publisher,
+		cqrs.EventBusConfig{
+			GeneratePublishTopic: func(params cqrs.GenerateEventPublishTopicParams) (string, error) {
+				return fmt.Sprintf("game-events.%s", params.EventName), nil
+			},
+			Marshaler: cqrs.JSONMarshaler{},
+			Logger:    watermillLogger,
+		},
+	)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to create event bus: %v", err))
+	}
+
+	// Create command processor
+	commandProcessor, err := cqrs.NewCommandProcessorWithConfig(
+		router,
+		cqrs.CommandProcessorConfig{
+			GenerateSubscribeTopic: func(params cqrs.CommandProcessorGenerateSubscribeTopicParams) (string, error) {
+				return fmt.Sprintf("game-commands.%s", params.CommandName), nil
+			},
+			SubscriberConstructor: func(params cqrs.CommandProcessorSubscriberConstructorParams) (message.Subscriber, error) {
+				return subscriber, nil
+			},
+			Marshaler: cqrs.JSONMarshaler{},
+			Logger:    watermillLogger,
+		},
+	)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to create command processor: %v", err))
+	}
+
+	// Create event processor
+	eventProcessor, err := cqrs.NewEventProcessorWithConfig(
+		router,
+		cqrs.EventProcessorConfig{
+			GenerateSubscribeTopic: func(params cqrs.EventProcessorGenerateSubscribeTopicParams) (string, error) {
+				return fmt.Sprintf("game-events.%s", params.EventName), nil
+			},
+			SubscriberConstructor: func(params cqrs.EventProcessorSubscriberConstructorParams) (message.Subscriber, error) {
+				return subscriber, nil
+			},
+			Marshaler: cqrs.JSONMarshaler{},
+			Logger:    watermillLogger,
+		},
+	)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to create event processor: %v", err))
+	}
+
+	// Create SSE broadcaster
+	sseBroadcaster := sse.NewSSEBroadcaster(apiLogger)
+
+	// Create event handlers
+	sseEventHandler := cqrshandlers.NewSSEEventHandler(
+		sseBroadcaster, // SSEBroadcaster interface
+		eventBus,       // EventPublisher interface
+		apiLogger,
+	)
+
 	server := &Server{
 		httpServer: &http.Server{
 			Addr:         fmt.Sprintf("%s:%d", config.Host, config.Port),
@@ -98,14 +230,33 @@ func NewServer(config ServerConfig, logger *logger.Logger, redisClient *redisx.C
 			WriteTimeout: config.WriteTimeout,
 			IdleTimeout:  config.IdleTimeout,
 		},
-		logger:         apiLogger,
-		redisClient:    redisClient,
-		mux:            mux,
-		trainerHandler: handlers.NewTrainerHandler(apiLogger, trainerRepo),
-		animalHandler:  handlers.NewAnimalHandler(apiLogger),
-		worldHandler:   handlers.NewWorldHandler(apiLogger),
-		authHandler:    handlers.NewAuthHandler(apiLogger, accountRepo, jwtService, oauthConfig),
-		authMiddleware: authMiddleware,
+		logger:            apiLogger,
+		redisClient:       redisClient,
+		mux:               mux,
+		trainerHandler:    handlers.NewTrainerHandler(apiLogger, trainerRepo, eventBus),
+		animalHandler:     handlers.NewAnimalHandler(apiLogger),
+		worldHandler:      handlers.NewWorldHandler(apiLogger),
+		authHandler:       handlers.NewAuthHandler(apiLogger, accountRepo, jwtService, oauthConfig),
+		serverHandler:     handlers.NewServerHandler(),
+		authMiddleware:    authMiddleware,
+		sseBroadcaster:    sseBroadcaster,
+		commandBus:        commandBus,
+		eventBus:          eventBus,
+		commandProcessor:  commandProcessor,
+		eventProcessor:    eventProcessor,
+		router:            router,
+		sseEventHandler:   sseEventHandler,
+	}
+
+	// Register only event handlers for SSE broadcasting
+	err = eventProcessor.AddHandlers(
+		cqrs.NewEventHandler("TrainerMovedEvent", sseEventHandler.HandleTrainerMovedEvent),
+		cqrs.NewEventHandler("TrainerStoppedEvent", sseEventHandler.HandleTrainerStoppedEvent),
+		cqrs.NewEventHandler("TrainerCreatedEvent", sseEventHandler.HandleTrainerCreatedEvent),
+		cqrs.NewEventHandler("SSENotificationEvent", sseEventHandler.HandleSSENotificationEvent),
+	)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to register event handlers: %v", err))
 	}
 
 	server.setupRoutes()
@@ -122,16 +273,19 @@ func (s *Server) setupRoutes() {
 	// Swagger documentation endpoint
 	s.mux.HandleFunc("/swagger/", httpSwagger.WrapHandler)
 
+	// Server info endpoint (no auth required)
+	s.mux.HandleFunc("/api/v1/server.Info", s.serverHandler.HandleServerInfo)
+
 	// General purpose ping endpoint (hybrid)
 	s.mux.HandleFunc("/api/v1/ping", s.handlePing)
 
 	// OAuth endpoints (no auth required)
 	s.mux.HandleFunc("/api/v1/auth.OAuthStart", s.authHandler.HandleOAuthStart)
 	s.mux.HandleFunc("/api/v1/auth.OAuthCallback", s.authHandler.HandleOAuthCallback)
-	
+
 	// Guest login (no auth required)
 	s.mux.HandleFunc("/api/v1/auth.GuestLogin", s.authHandler.HandleGuestLogin)
-	
+
 	// Social linking (auth required - guest accounts only)
 	s.mux.Handle("/api/v1/auth.LinkSocial", s.authMiddleware.RequireAuth(http.HandlerFunc(s.authHandler.HandleLinkSocial)))
 
@@ -139,6 +293,7 @@ func (s *Server) setupRoutes() {
 	s.mux.Handle("/api/v1/trainer.Create", s.authMiddleware.RequireAuth(http.HandlerFunc(s.trainerHandler.HandleCreate)))
 	s.mux.Handle("/api/v1/trainer.Get", s.authMiddleware.RequireAuth(http.HandlerFunc(s.trainerHandler.HandleGet)))
 	s.mux.Handle("/api/v1/trainer.Move", s.authMiddleware.RequireAuth(http.HandlerFunc(s.trainerHandler.HandleMove)))
+	s.mux.Handle("/api/v1/trainer.FetchPosition", s.authMiddleware.RequireAuth(http.HandlerFunc(s.trainerHandler.HandleFetchPosition)))
 	s.mux.Handle("/api/v1/trainer.List", s.authMiddleware.RequireAuth(http.HandlerFunc(s.trainerHandler.HandleList)))
 	s.mux.Handle("/api/v1/trainer.Status", s.authMiddleware.RequireAuth(http.HandlerFunc(s.trainerHandler.HandleStatus)))
 
@@ -150,13 +305,19 @@ func (s *Server) setupRoutes() {
 
 	// World endpoints (JWT auth required)
 	s.mux.Handle("/api/v1/world.Get", s.authMiddleware.RequireAuth(http.HandlerFunc(s.worldHandler.HandleGet)))
+
+	// Static file serving for client
+	s.mux.HandleFunc("/", s.handleStaticFiles)
+
+	// SSE endpoint for real-time updates (uses dedicated SSE auth middleware)
+	s.mux.Handle("/api/v1/stream/positions", s.authMiddleware.RequireSSEAuth(http.HandlerFunc(s.sseBroadcaster.HandleSSE)))
 }
 
 // setupMiddleware applies middleware to all routes
 func (s *Server) setupMiddleware() {
 	// Apply middleware chain using functional composition
 	middlewareChain := middleware.Chain(
-		middleware.RateLimit(s.logger),
+		// middleware.RateLimit(s.logger), // Disabled for real-time movement
 		middleware.Recovery(s.logger),
 		middleware.ErrorAdapter(s.logger),
 		middleware.CORS(),
@@ -170,6 +331,13 @@ func (s *Server) setupMiddleware() {
 func (s *Server) Start(ctx context.Context) error {
 	s.logger.Info("Starting HTTP server",
 		zap.String("address", s.httpServer.Addr))
+
+	// Start Watermill router first
+	go func() {
+		if err := s.router.Run(ctx); err != nil {
+			s.logger.Error("Watermill router error", zap.Error(err))
+		}
+	}()
 
 	// Start server in goroutine
 	go func() {
@@ -188,12 +356,28 @@ func (s *Server) Start(ctx context.Context) error {
 func (s *Server) Shutdown() error {
 	s.logger.Info("Shutting down HTTP server")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// Shutdown SSE broadcaster first to close client connections
+	if s.sseBroadcaster != nil {
+		s.logger.Debug("Closing SSE broadcaster")
+		s.sseBroadcaster.Close()
+	}
+
+	// Shutdown HTTP server with shorter timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := s.httpServer.Shutdown(ctx); err != nil {
 		s.logger.Error("Server shutdown error", zap.Error(err))
 		return err
+	}
+
+	// Shutdown Watermill router (with CloseTimeout already configured)
+	if s.router != nil {
+		s.logger.Info("Closing Watermill router")
+		if err := s.router.Close(); err != nil {
+			s.logger.Error("Router shutdown error", zap.Error(err))
+			return err
+		}
 	}
 
 	s.logger.Info("HTTP server stopped")
@@ -237,4 +421,28 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
 
 	result := map[string]string{"message": "pong"}
 	jsonrpcx.Success(w, req.ID, result)
+}
+
+// handleStaticFiles serves static files with proper MIME types
+func (s *Server) handleStaticFiles(w http.ResponseWriter, r *http.Request) {
+	switch r.URL.Path {
+	case "/":
+		// Serve the trainer client HTML file
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		http.ServeFile(w, r, "trainer-client.html")
+		return
+	case "/trainer-client.js":
+		// Serve JavaScript file with correct MIME type
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+		http.ServeFile(w, r, "trainer-client.js")
+		return
+	case "/trainer-client.html":
+		// Also allow direct access to HTML file
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		http.ServeFile(w, r, "trainer-client.html")
+		return
+	default:
+		// 404 for other paths
+		http.NotFound(w, r)
+	}
 }
