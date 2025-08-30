@@ -1,0 +1,1087 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JSON Schema to SQLite Editor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="sqlite-data-editor.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'node-bg': '#f8fafc',
+                        'node-border': '#e2e8f0',
+                        'node-selected': '#3b82f6'
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Header -->
+    <header class="bg-white shadow-sm border-b">
+        <div class="max-w-7xl mx-auto px-4 py-4">
+            <h1 class="text-2xl font-bold text-gray-900">JSON Schema to SQLite Editor</h1>
+            <p class="text-gray-600 mt-1">노드 기반 스키마 편집기로 JSON 스키마를 만들고 SQLite 테이블로 변환하세요</p>
+        </div>
+    </header>
+
+    <div class="flex h-screen">
+        <!-- Sidebar -->
+        <aside class="w-64 bg-white shadow-sm border-r">
+            <div class="p-4">
+                <h2 class="text-lg font-semibold mb-4">노드 팔레트</h2>
+                <div class="space-y-2">
+                    <div class="node-template bg-blue-100 border border-blue-300 rounded-lg p-3 cursor-grab hover:bg-blue-200 transition-colors" 
+                         data-type="table" draggable="true">
+                        <div class="flex items-center">
+                            <div class="w-3 h-3 bg-blue-500 rounded mr-2"></div>
+                            <span class="text-sm font-medium">Table</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mt-4 p-3 bg-gray-50 rounded text-xs text-gray-600">
+                    <div class="font-medium mb-2">필드 타입:</div>
+                    <div class="space-y-1">
+                        <div class="flex items-center">
+                            <div class="w-2 h-2 bg-green-500 rounded mr-2"></div>
+                            <span>String - 문자열</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-2 h-2 bg-yellow-500 rounded mr-2"></div>
+                            <span>Integer - 정수</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-2 h-2 bg-purple-500 rounded mr-2"></div>
+                            <span>Boolean - 참/거짓</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-2 h-2 bg-red-500 rounded mr-2"></div>
+                            <span>DateTime - 날짜/시간</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-2 h-2 bg-indigo-500 rounded mr-2"></div>
+                            <span>Object - 오브젝트</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-2 h-2 bg-orange-500 rounded mr-2"></div>
+                            <span>Array - 배열</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Control Panel -->
+            <div class="p-4 border-t">
+                <h3 class="text-md font-semibold mb-3">제어</h3>
+                <div class="space-y-2">
+                    <button id="generateSchema" class="w-full bg-blue-600 text-white py-2 px-3 rounded hover:bg-blue-700 transition-colors text-sm">
+                        JSON Schema 생성
+                    </button>
+                    <button id="generateSQL" class="w-full bg-green-600 text-white py-2 px-3 rounded hover:bg-green-700 transition-colors text-sm">
+                        SQLite Schema 생성
+                    </button>
+                    <button id="clearCanvas" class="w-full bg-red-600 text-white py-2 px-3 rounded hover:bg-red-700 transition-colors text-sm">
+                        캔버스 초기화
+                    </button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Canvas -->
+        <main class="flex-1 flex flex-col">
+            <!-- Canvas -->
+            <div class="flex-1 relative bg-gray-100 overflow-hidden">
+                <div id="canvas" class="w-full h-full relative" style="background-image: radial-gradient(circle, #ccc 1px, transparent 1px); background-size: 20px 20px;">
+                    <!-- Nodes will be dynamically added here -->
+                </div>
+            </div>
+
+            <!-- Output Panel -->
+            <div class="h-80 bg-white border-t">
+                <div class="flex border-b">
+                    <button class="tab-button px-4 py-2 bg-blue-600 text-white" data-tab="json">JSON Schema</button>
+                    <button class="tab-button px-4 py-2 bg-gray-200 text-gray-700 hover:bg-gray-300" data-tab="sql">SQLite Schema</button>
+                    <button class="tab-button px-4 py-2 bg-gray-200 text-gray-700 hover:bg-gray-300" data-tab="data">데이터 편집기</button>
+                </div>
+                <div class="p-4 h-64 overflow-auto">
+                    <pre id="jsonOutput" class="tab-content text-sm bg-gray-50 p-3 rounded border" data-tab="json">
+{
+  "type": "object",
+  "properties": {}
+}
+                    </pre>
+                    <pre id="sqlOutput" class="tab-content text-sm bg-gray-50 p-3 rounded border hidden" data-tab="sql">
+-- JSON 기반 SQLite 스키마가 여기에 생성됩니다
+-- 모든 데이터는 JSON 컬럼에 저장되며 SQLite JSON 함수로 쿼리할 수 있습니다
+                    </pre>
+                    <div id="dataOutput" class="tab-content hidden h-64 -m-4" data-tab="data">
+                        <!-- 데이터 편집기가 여기에 로드됩니다 -->
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Context Menu -->
+    <div id="contextMenu" class="fixed bg-white shadow-lg border rounded-lg py-2 hidden z-50" style="min-width: 160px;">
+        <div class="px-4 py-2 text-sm text-gray-600 border-b">노드 추가</div>
+        <button class="context-item w-full text-left px-4 py-2 hover:bg-gray-100 text-sm" data-type="object">
+            <span class="inline-block w-3 h-3 bg-indigo-500 rounded mr-2"></span>Object
+        </button>
+        <button class="context-item w-full text-left px-4 py-2 hover:bg-gray-100 text-sm" data-type="array">
+            <span class="inline-block w-3 h-3 bg-orange-500 rounded mr-2"></span>Array
+        </button>
+        <button class="context-item w-full text-left px-4 py-2 hover:bg-gray-100 text-sm" data-type="string">
+            <span class="inline-block w-3 h-3 bg-green-500 rounded mr-2"></span>String
+        </button>
+        <button class="context-item w-full text-left px-4 py-2 hover:bg-gray-100 text-sm" data-type="integer">
+            <span class="inline-block w-3 h-3 bg-yellow-500 rounded mr-2"></span>Integer
+        </button>
+        <button class="context-item w-full text-left px-4 py-2 hover:bg-gray-100 text-sm" data-type="boolean">
+            <span class="inline-block w-3 h-3 bg-purple-500 rounded mr-2"></span>Boolean
+        </button>
+        <button class="context-item w-full text-left px-4 py-2 hover:bg-gray-100 text-sm" data-type="datetime">
+            <span class="inline-block w-3 h-3 bg-red-500 rounded mr-2"></span>DateTime
+        </button>
+    </div>
+
+    <!-- Node Property Modal -->
+    <div id="propertyModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50">
+        <div class="flex items-center justify-center h-full">
+            <div class="bg-white rounded-lg p-6 w-96 max-h-96 overflow-y-auto">
+                <h3 class="text-lg font-semibold mb-4">노드 속성</h3>
+                <div id="propertyForm" class="space-y-3">
+                    <!-- Dynamic form fields will be added here -->
+                </div>
+                <div class="flex gap-2 mt-6">
+                    <button id="saveProperties" class="flex-1 bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700">저장</button>
+                    <button id="closeModal" class="flex-1 bg-gray-600 text-white py-2 px-4 rounded hover:bg-gray-700">취소</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class SchemaEditor {
+            constructor() {
+                this.canvas = document.getElementById('canvas');
+                this.contextMenu = document.getElementById('contextMenu');
+                this.nodes = new Map();
+                this.selectedNode = null;
+                this.selectedField = null;
+                this.contextTargetNode = null;
+                this.contextTargetField = null;
+                this.nodeCounter = 0;
+                this.fieldCounter = 0;
+                this.dataEditor = null;
+                
+                this.initEventListeners();
+                this.initDragDrop();
+                this.initContextMenu();
+                this.initDataEditor();
+            }
+
+            initDataEditor() {
+                this.dataEditor = new SQLiteDataEditor('dataOutput');
+                window.dataEditor = this.dataEditor; // Global access for onclick handlers
+            }
+
+            initEventListeners() {
+                // Tab switching
+                document.querySelectorAll('.tab-button').forEach(button => {
+                    button.addEventListener('click', (e) => {
+                        const tab = e.target.dataset.tab;
+                        this.switchTab(tab);
+                        
+                        // 데이터 편집기 탭 선택시 테이블 목록 업데이트
+                        if (tab === 'data') {
+                            this.updateDataEditorTables();
+                        }
+                    });
+                });
+
+                // Control buttons
+                document.getElementById('generateSchema').addEventListener('click', () => this.generateJsonSchema());
+                document.getElementById('generateSQL').addEventListener('click', () => this.generateSQLSchema());
+                document.getElementById('clearCanvas').addEventListener('click', () => this.clearCanvas());
+
+                // Modal
+                document.getElementById('closeModal').addEventListener('click', () => this.closeModal());
+                document.getElementById('saveProperties').addEventListener('click', () => this.saveProperties());
+
+                // Hide context menu when clicking outside
+                document.addEventListener('click', (e) => {
+                    if (!this.contextMenu.contains(e.target)) {
+                        this.hideContextMenu();
+                    }
+                });
+            }
+
+            initContextMenu() {
+                // Context menu items
+                document.querySelectorAll('.context-item').forEach(item => {
+                    item.addEventListener('click', (e) => {
+                        const nodeType = e.target.dataset.type;
+                        this.addChildNode(nodeType);
+                        this.hideContextMenu();
+                    });
+                });
+            }
+
+            initDragDrop() {
+                // Drag from palette
+                document.querySelectorAll('.node-template').forEach(template => {
+                    template.addEventListener('dragstart', (e) => {
+                        e.dataTransfer.setData('text/plain', template.dataset.type);
+                    });
+                });
+
+                // Drop on canvas
+                this.canvas.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                });
+
+                this.canvas.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    const nodeType = e.dataTransfer.getData('text/plain');
+                    const rect = this.canvas.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+                    this.createNode(nodeType, x, y);
+                });
+            }
+
+            createNode(type, x, y) {
+                const nodeId = `node_${++this.nodeCounter}`;
+                const nodeData = {
+                    id: nodeId,
+                    type: type,
+                    x: x,
+                    y: y,
+                    properties: this.getDefaultProperties(type)
+                };
+
+                const nodeElement = this.createNodeElement(nodeData);
+                this.canvas.appendChild(nodeElement);
+                this.nodes.set(nodeId, { element: nodeElement, data: nodeData });
+            }
+
+            getDefaultProperties(type) {
+                const defaults = {
+                    table: { name: 'users', description: '', fields: [] }
+                };
+                return defaults[type] || {};
+            }
+
+            createNodeElement(nodeData) {
+                const div = document.createElement('div');
+                div.className = `absolute border-2 rounded-lg bg-blue-100 border-blue-300 min-w-48 max-w-80`;
+                div.style.left = `${nodeData.x}px`;
+                div.style.top = `${nodeData.y}px`;
+                div.dataset.nodeId = nodeData.id;
+
+                this.renderContainerNode(div, nodeData);
+                return div;
+            }
+
+            renderContainerNode(div, nodeData) {
+                const fields = nodeData.properties.fields || [];
+                const fieldsHtml = fields.map(field => this.renderFieldHtml(field, nodeData.id, 0)).join('');
+
+                div.innerHTML = `
+                    <div class="p-3 cursor-move node-header">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <div class="font-medium text-sm">${nodeData.type}</div>
+                                <div class="text-xs text-gray-600">${nodeData.properties.name || 'unnamed'}</div>
+                            </div>
+                            <button class="add-field-btn w-6 h-6 bg-green-600 text-white rounded-full flex items-center justify-center cursor-pointer text-xs hover:bg-green-700" data-parent-node="${nodeData.id}" title="필드 추가">+</button>
+                        </div>
+                    </div>
+                    <div class="border-t border-gray-300">
+                        <div class="p-2 space-y-1 fields-container">
+                            ${fieldsHtml}
+                            ${fields.length === 0 ? '<div class="text-xs text-gray-400 py-2 text-center">필드가 없습니다</div>' : ''}
+                        </div>
+                    </div>
+                `;
+
+                this.addContainerEventListeners(div, nodeData);
+            }
+
+            renderFieldHtml(field, parentNodeId, depth = 0) {
+                const indent = depth > 0 ? `style="margin-left: ${depth * 12}px"` : '';
+                const isContainer = ['object', 'array'].includes(field.type);
+                const hasSubFields = field.fields && field.fields.length > 0;
+                
+                let html = `
+                    <div class="field-item" data-field-id="${field.id}" ${indent}>
+                        <div class="flex items-center justify-between py-1 px-2 bg-white bg-opacity-50 rounded text-xs hover:bg-opacity-70">
+                            <div class="flex items-center">
+                                <span class="w-2 h-2 rounded-full mr-2 ${this.getFieldColor(field.type)}"></span>
+                                <span class="font-medium">${field.name}</span>
+                                <span class="text-gray-500 ml-1">(${field.type})</span>
+                                ${field.required ? '<span class="text-red-500 ml-1">*</span>' : ''}
+                                ${hasSubFields ? `<span class="text-gray-400 ml-1">[${field.fields.length}]</span>` : ''}
+                            </div>
+                            <div class="flex gap-1">
+                                ${isContainer ? `<button class="add-subfield-btn w-4 h-4 text-gray-600 hover:text-green-600" data-field-id="${field.id}" data-parent-node="${parentNodeId}" title="하위 필드 추가">+</button>` : ''}
+                                <button class="edit-field-btn w-4 h-4 text-gray-600 hover:text-blue-600" data-field-id="${field.id}" title="편집">✏️</button>
+                                <button class="delete-field-btn w-4 h-4 text-gray-600 hover:text-red-600" data-field-id="${field.id}" title="삭제">🗑️</button>
+                            </div>
+                        </div>
+                `;
+
+                // Render sub-fields if they exist
+                if (hasSubFields) {
+                    html += '<div class="sub-fields">';
+                    field.fields.forEach(subField => {
+                        html += this.renderFieldHtml(subField, parentNodeId, depth + 1);
+                    });
+                    html += '</div>';
+                }
+
+                html += '</div>';
+                return html;
+            }
+
+
+            addContainerEventListeners(div, nodeData) {
+                // Make draggable (header only)
+                const header = div.querySelector('.node-header');
+                header.addEventListener('mousedown', (e) => {
+                    if (!e.target.classList.contains('add-field-btn')) {
+                        this.startNodeDrag(e, nodeData.id);
+                    }
+                });
+
+                // Double click to edit properties (header only)
+                header.addEventListener('dblclick', (e) => {
+                    if (!e.target.classList.contains('add-field-btn')) {
+                        this.openPropertyModal(nodeData.id);
+                    }
+                });
+
+                // Add field button (main)
+                const addButton = div.querySelector('.add-field-btn');
+                addButton.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.contextTargetNode = nodeData.id;
+                    this.contextTargetField = null;
+                    this.showContextMenu(e, nodeData.id);
+                });
+
+                // Add sub-field buttons
+                div.querySelectorAll('.add-subfield-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const fieldId = btn.dataset.fieldId;
+                        const parentNodeId = btn.dataset.parentNode;
+                        this.contextTargetNode = parentNodeId;
+                        this.contextTargetField = fieldId;
+                        this.showContextMenu(e, parentNodeId);
+                    });
+                });
+
+                // Field edit buttons
+                div.querySelectorAll('.edit-field-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const fieldId = btn.dataset.fieldId;
+                        this.editField(nodeData.id, fieldId);
+                    });
+                });
+
+                // Field delete buttons
+                div.querySelectorAll('.delete-field-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const fieldId = btn.dataset.fieldId;
+                        this.deleteField(nodeData.id, fieldId);
+                    });
+                });
+            }
+
+            getFieldColor(fieldType) {
+                const colors = {
+                    string: 'bg-green-500',
+                    integer: 'bg-yellow-500',
+                    boolean: 'bg-purple-500',
+                    datetime: 'bg-red-500',
+                    object: 'bg-indigo-500',
+                    array: 'bg-orange-500'
+                };
+                return colors[fieldType] || 'bg-gray-500';
+            }
+
+            startNodeDrag(e, nodeId) {
+                e.preventDefault();
+                const nodeData = this.nodes.get(nodeId);
+                const startX = e.clientX - nodeData.data.x;
+                const startY = e.clientY - nodeData.data.y;
+
+                const onMouseMove = (e) => {
+                    const newX = e.clientX - startX;
+                    const newY = e.clientY - startY;
+                    
+                    nodeData.data.x = newX;
+                    nodeData.data.y = newY;
+                    nodeData.element.style.left = `${newX}px`;
+                    nodeData.element.style.top = `${newY}px`;
+                };
+
+                const onMouseUp = () => {
+                    document.removeEventListener('mousemove', onMouseMove);
+                    document.removeEventListener('mouseup', onMouseUp);
+                };
+
+                document.addEventListener('mousemove', onMouseMove);
+                document.addEventListener('mouseup', onMouseUp);
+            }
+
+            addChildNode(nodeType) {
+                if (!this.contextTargetNode) return;
+
+                const parentNode = this.nodes.get(this.contextTargetNode);
+                if (!parentNode) return;
+
+                let parentPath = [parentNode.data.properties.name];
+                let targetFields = parentNode.data.properties.fields;
+
+                // If adding to a nested field
+                if (this.contextTargetField) {
+                    const parentField = this.findFieldById(parentNode.data.properties.fields, this.contextTargetField);
+                    if (parentField) {
+                        if (!parentField.fields) parentField.fields = [];
+                        targetFields = parentField.fields;
+                        parentPath = [...(parentField.path || [parentNode.data.properties.name]), parentField.name];
+                    }
+                }
+
+                // Create field object with parent reference
+                const field = {
+                    id: `field_${++this.fieldCounter}`,
+                    type: nodeType,
+                    name: `new_${nodeType}`,
+                    required: false,
+                    parentNodeId: this.contextTargetNode,
+                    parentType: parentNode.data.type,
+                    parentName: parentNode.data.properties.name,
+                    parentFieldId: this.contextTargetField || null,
+                    path: parentPath,
+                    ...this.getDefaultFieldProperties(nodeType)
+                };
+
+                // Add to target fields array
+                targetFields.push(field);
+
+                // Re-render the container node
+                this.renderContainerNode(parentNode.element, parentNode.data);
+
+                // Open field editor
+                setTimeout(() => {
+                    this.editField(this.contextTargetNode, field.id);
+                }, 100);
+            }
+
+            findFieldById(fields, fieldId) {
+                for (let field of fields) {
+                    if (field.id === fieldId) {
+                        return field;
+                    }
+                    if (field.fields) {
+                        const found = this.findFieldById(field.fields, fieldId);
+                        if (found) return found;
+                    }
+                }
+                return null;
+            }
+
+            getDefaultFieldProperties(type) {
+                const defaults = {
+                    string: { maxLength: 255 },
+                    integer: { autoIncrement: false },
+                    boolean: { default: false },
+                    datetime: { default: 'CURRENT_TIMESTAMP' },
+                    object: { fields: [] },
+                    array: { itemType: 'string', fields: [] }
+                };
+                return defaults[type] || {};
+            }
+
+            editField(nodeId, fieldId) {
+                const nodeData = this.nodes.get(nodeId);
+                if (!nodeData) return;
+
+                const field = this.findFieldById(nodeData.data.properties.fields, fieldId);
+                if (!field) return;
+
+                this.selectedNode = nodeId;
+                this.selectedField = field;
+                
+                const form = document.getElementById('propertyForm');
+                form.innerHTML = this.generateFieldPropertyForm(field);
+                
+                document.getElementById('propertyModal').classList.remove('hidden');
+            }
+
+            deleteField(nodeId, fieldId) {
+                if (!confirm('이 필드를 삭제하시겠습니까?')) return;
+
+                const nodeData = this.nodes.get(nodeId);
+                if (!nodeData) return;
+
+                // Remove field from nested structure
+                this.removeFieldById(nodeData.data.properties.fields, fieldId);
+
+                // Re-render the container node
+                this.renderContainerNode(nodeData.element, nodeData.data);
+            }
+
+            removeFieldById(fields, fieldId) {
+                for (let i = 0; i < fields.length; i++) {
+                    if (fields[i].id === fieldId) {
+                        fields.splice(i, 1);
+                        return true;
+                    }
+                    if (fields[i].fields) {
+                        if (this.removeFieldById(fields[i].fields, fieldId)) {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }
+
+            showContextMenu(e, nodeId) {
+                this.contextTargetNode = nodeId;
+                this.contextMenu.style.left = `${e.pageX}px`;
+                this.contextMenu.style.top = `${e.pageY}px`;
+                this.contextMenu.classList.remove('hidden');
+            }
+
+            hideContextMenu() {
+                this.contextMenu.classList.add('hidden');
+                this.contextTargetNode = null;
+            }
+
+
+            openPropertyModal(nodeId) {
+                const nodeData = this.nodes.get(nodeId);
+                this.selectedNode = nodeId;
+                
+                const form = document.getElementById('propertyForm');
+                form.innerHTML = this.generatePropertyForm(nodeData.data);
+                
+                document.getElementById('propertyModal').classList.remove('hidden');
+            }
+
+            generatePropertyForm(nodeData) {
+                let html = `<input type="hidden" id="nodeType" value="${nodeData.type}">`;
+                
+                if (nodeData.type === 'table') {
+                    html += `
+                        <div>
+                            <label class="block text-sm font-medium mb-1">테이블 이름</label>
+                            <input type="text" id="name" value="${nodeData.properties.name}" 
+                                   class="w-full border rounded px-3 py-2">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-1">설명</label>
+                            <textarea id="description" rows="2" 
+                                     class="w-full border rounded px-3 py-2">${nodeData.properties.description || ''}</textarea>
+                        </div>
+                    `;
+                } else if (nodeData.type === 'object') {
+                    html += `
+                        <div>
+                            <label class="block text-sm font-medium mb-1">오브젝트 이름</label>
+                            <input type="text" id="name" value="${nodeData.properties.name}" 
+                                   class="w-full border rounded px-3 py-2">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-1">설명</label>
+                            <textarea id="description" rows="2" 
+                                     class="w-full border rounded px-3 py-2">${nodeData.properties.description || ''}</textarea>
+                        </div>
+                    `;
+                } else if (nodeData.type === 'array') {
+                    html += `
+                        <div>
+                            <label class="block text-sm font-medium mb-1">배열 이름</label>
+                            <input type="text" id="name" value="${nodeData.properties.name}" 
+                                   class="w-full border rounded px-3 py-2">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-1">배열 아이템 타입</label>
+                            <select id="itemType" class="w-full border rounded px-3 py-2">
+                                <option value="string" ${nodeData.properties.itemType === 'string' ? 'selected' : ''}>String</option>
+                                <option value="integer" ${nodeData.properties.itemType === 'integer' ? 'selected' : ''}>Integer</option>
+                                <option value="boolean" ${nodeData.properties.itemType === 'boolean' ? 'selected' : ''}>Boolean</option>
+                                <option value="object" ${nodeData.properties.itemType === 'object' ? 'selected' : ''}>Object</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-1">설명</label>
+                            <textarea id="description" rows="2" 
+                                     class="w-full border rounded px-3 py-2">${nodeData.properties.description || ''}</textarea>
+                        </div>
+                    `;
+                }
+
+                return html;
+            }
+
+            generateFieldPropertyForm(field) {
+                let html = `<input type="hidden" id="fieldType" value="${field.type}">`;
+                
+                // Show parent hierarchy
+                html += `
+                    <div class="mb-4 p-3 bg-gray-50 rounded border">
+                        <div class="text-xs font-medium text-gray-700 mb-1">부모 경로</div>
+                        <div class="text-sm text-gray-600">
+                            <span class="inline-flex items-center px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">
+                                ${field.parentType}: ${field.parentName}
+                            </span>
+                            ${field.path ? ` → ${field.path.slice(1).join(' → ')}` : ''}
+                        </div>
+                        <div class="text-xs text-gray-500 mt-1">
+                            필드 ID: <code class="bg-gray-200 px-1 rounded">${field.id}</code>
+                        </div>
+                    </div>
+                `;
+                
+                html += `
+                    <div>
+                        <label class="block text-sm font-medium mb-1">필드 이름</label>
+                        <input type="text" id="fieldName" value="${field.name}" 
+                               class="w-full border rounded px-3 py-2">
+                    </div>
+                    <div>
+                        <label class="flex items-center">
+                            <input type="checkbox" id="fieldRequired" ${field.required ? 'checked' : ''} 
+                                   class="mr-2">
+                            필수 필드
+                        </label>
+                    </div>
+                `;
+
+                if (field.type === 'string') {
+                    html += `
+                        <div>
+                            <label class="block text-sm font-medium mb-1">최대 길이</label>
+                            <input type="number" id="fieldMaxLength" value="${field.maxLength || 255}" 
+                                   class="w-full border rounded px-3 py-2">
+                        </div>
+                    `;
+                }
+
+                if (field.type === 'integer') {
+                    html += `
+                        <div>
+                            <label class="flex items-center">
+                                <input type="checkbox" id="fieldAutoIncrement" ${field.autoIncrement ? 'checked' : ''} 
+                                       class="mr-2">
+                                자동 증가
+                            </label>
+                        </div>
+                    `;
+                }
+
+                if (field.type === 'array') {
+                    html += `
+                        <div>
+                            <label class="block text-sm font-medium mb-1">배열 아이템 타입</label>
+                            <select id="fieldItemType" class="w-full border rounded px-3 py-2">
+                                <option value="string" ${field.itemType === 'string' ? 'selected' : ''}>String</option>
+                                <option value="integer" ${field.itemType === 'integer' ? 'selected' : ''}>Integer</option>
+                                <option value="boolean" ${field.itemType === 'boolean' ? 'selected' : ''}>Boolean</option>
+                                <option value="object" ${field.itemType === 'object' ? 'selected' : ''}>Object</option>
+                            </select>
+                        </div>
+                    `;
+                }
+
+                return html;
+            }
+
+            saveProperties() {
+                const form = document.getElementById('propertyForm');
+                
+                if (this.selectedField) {
+                    // Save field properties
+                    const fieldNameInput = form.querySelector('#fieldName');
+                    if (fieldNameInput) this.selectedField.name = fieldNameInput.value;
+                    
+                    const fieldRequiredInput = form.querySelector('#fieldRequired');
+                    if (fieldRequiredInput) this.selectedField.required = fieldRequiredInput.checked;
+                    
+                    const fieldMaxLengthInput = form.querySelector('#fieldMaxLength');
+                    if (fieldMaxLengthInput) this.selectedField.maxLength = parseInt(fieldMaxLengthInput.value);
+                    
+                    const fieldAutoIncrementInput = form.querySelector('#fieldAutoIncrement');
+                    if (fieldAutoIncrementInput) this.selectedField.autoIncrement = fieldAutoIncrementInput.checked;
+
+                    const fieldItemTypeInput = form.querySelector('#fieldItemType');
+                    if (fieldItemTypeInput) this.selectedField.itemType = fieldItemTypeInput.value;
+
+                    // Re-render the container node
+                    const nodeData = this.nodes.get(this.selectedNode);
+                    this.renderContainerNode(nodeData.element, nodeData.data);
+
+                    this.selectedField = null;
+                } else {
+                    // Save node properties
+                    const nodeData = this.nodes.get(this.selectedNode);
+                    
+                    const nameInput = form.querySelector('#name');
+                    if (nameInput) nodeData.data.properties.name = nameInput.value;
+                    
+                    const descriptionInput = form.querySelector('#description');
+                    if (descriptionInput) nodeData.data.properties.description = descriptionInput.value;
+
+                    const itemTypeInput = form.querySelector('#itemType');
+                    if (itemTypeInput) nodeData.data.properties.itemType = itemTypeInput.value;
+
+                    // Update node display
+                    const isContainer = ['table', 'object', 'array'].includes(nodeData.data.type);
+                    if (isContainer) {
+                        this.renderContainerNode(nodeData.element, nodeData.data);
+                    } else {
+                        const nameDisplay = nodeData.element.querySelector('.text-xs');
+                        if (nameDisplay) nameDisplay.textContent = nodeData.data.properties.name || 'unnamed';
+                    }
+                }
+
+                this.closeModal();
+            }
+
+            closeModal() {
+                document.getElementById('propertyModal').classList.add('hidden');
+                this.selectedNode = null;
+                this.selectedField = null;
+            }
+
+            updateDataEditorTables() {
+                const tables = Array.from(this.nodes.values())
+                    .filter(node => node.data.type === 'table')
+                    .map(node => ({ name: node.data.properties.name }));
+                
+                this.dataEditor.updateTableList(tables);
+                
+                // 각 테이블의 스키마를 데이터 편집기에 등록
+                this.nodes.forEach(node => {
+                    if (node.data.type === 'table') {
+                        this.dataEditor.setTableSchema(node.data.properties.name, {
+                            fields: node.data.properties.fields || []
+                        });
+                    }
+                });
+            }
+
+            switchTab(tab) {
+                document.querySelectorAll('.tab-button').forEach(btn => {
+                    btn.classList.remove('bg-blue-600', 'text-white');
+                    btn.classList.add('bg-gray-200', 'text-gray-700');
+                });
+                document.querySelector(`[data-tab="${tab}"]`).classList.remove('bg-gray-200', 'text-gray-700');
+                document.querySelector(`[data-tab="${tab}"]`).classList.add('bg-blue-600', 'text-white');
+
+                document.querySelectorAll('.tab-content').forEach(content => content.classList.add('hidden'));
+                document.querySelector(`#${tab}Output`).classList.remove('hidden');
+            }
+
+            generateJsonSchema() {
+                const schema = {
+                    type: "object",
+                    properties: {}
+                };
+
+                // Get root containers (table, object, array)
+                const rootNodes = Array.from(this.nodes.values()).filter(node => 
+                    ['table', 'object', 'array'].includes(node.data.type)
+                );
+
+                rootNodes.forEach(rootNode => {
+                    const rootName = rootNode.data.properties.name;
+                    const rootSchema = this.buildNodeSchema(rootNode.data);
+                    schema.properties[rootName] = rootSchema;
+                });
+
+                document.getElementById('jsonOutput').textContent = JSON.stringify(schema, null, 2);
+            }
+
+            buildNodeSchema(nodeData) {
+                let schema = {};
+
+                if (nodeData.type === 'table' || nodeData.type === 'object') {
+                    schema = {
+                        type: "object",
+                        description: nodeData.properties.description,
+                        properties: {}
+                    };
+
+                    const fields = nodeData.properties.fields || [];
+                    fields.forEach(field => {
+                        const fieldSchema = this.buildFieldSchema(field);
+                        
+                        if (field.required) {
+                            if (!schema.required) schema.required = [];
+                            schema.required.push(field.name);
+                        }
+
+                        schema.properties[field.name] = fieldSchema;
+                    });
+                } else if (nodeData.type === 'array') {
+                    schema = {
+                        type: "array",
+                        description: nodeData.properties.description
+                    };
+
+                    if (nodeData.properties.itemType === 'object') {
+                        // For object arrays, build the object schema from fields
+                        const fields = nodeData.properties.fields || [];
+                        if (fields.length > 0) {
+                            schema.items = {
+                                type: "object",
+                                properties: {}
+                            };
+
+                            fields.forEach(field => {
+                                const fieldSchema = this.buildFieldSchema(field);
+                                schema.items.properties[field.name] = fieldSchema;
+
+                                if (field.required) {
+                                    if (!schema.items.required) schema.items.required = [];
+                                    schema.items.required.push(field.name);
+                                }
+                            });
+                        } else {
+                            schema.items = { type: "object" };
+                        }
+                    } else {
+                        schema.items = { type: this.getJsonType(nodeData.properties.itemType) };
+                    }
+                }
+
+                return schema;
+            }
+
+            buildFieldSchema(field) {
+                let schema = {};
+
+                if (field.type === 'object') {
+                    schema = {
+                        type: "object",
+                        properties: {}
+                    };
+                    
+                    const subFields = field.fields || [];
+                    subFields.forEach(subField => {
+                        const subSchema = this.buildFieldSchema(subField);
+                        schema.properties[subField.name] = subSchema;
+                        
+                        if (subField.required) {
+                            if (!schema.required) schema.required = [];
+                            schema.required.push(subField.name);
+                        }
+                    });
+                } else if (field.type === 'array') {
+                    schema = {
+                        type: "array"
+                    };
+                    
+                    if (field.itemType === 'object') {
+                        const subFields = field.fields || [];
+                        if (subFields.length > 0) {
+                            schema.items = {
+                                type: "object",
+                                properties: {}
+                            };
+                            
+                            subFields.forEach(subField => {
+                                const subSchema = this.buildFieldSchema(subField);
+                                schema.items.properties[subField.name] = subSchema;
+                                
+                                if (subField.required) {
+                                    if (!schema.items.required) schema.items.required = [];
+                                    schema.items.required.push(subField.name);
+                                }
+                            });
+                        } else {
+                            schema.items = { type: "object" };
+                        }
+                    } else {
+                        schema.items = { type: this.getJsonType(field.itemType) };
+                    }
+                } else {
+                    // Primitive types
+                    schema.type = this.getJsonType(field.type);
+                    
+                    if (field.type === 'string' && field.maxLength) {
+                        schema.maxLength = field.maxLength;
+                    }
+                }
+
+                return schema;
+            }
+
+            getJsonType(nodeType) {
+                const mapping = {
+                    string: 'string',
+                    integer: 'integer',
+                    boolean: 'boolean',
+                    datetime: 'string'
+                };
+                return mapping[nodeType] || 'string';
+            }
+
+            generateSQLSchema() {
+                let sql = '-- Generated SQLite Schema for JSON-first approach\n';
+                sql += '-- All complex data is stored as JSON with SQLite JSON functions support\n\n';
+
+                // Get root tables only
+                const tables = Array.from(this.nodes.values()).filter(node => 
+                    node.data.type === 'table'
+                );
+
+                tables.forEach(table => {
+                    const tableName = table.data.properties.name;
+                    sql += `CREATE TABLE ${tableName} (\n`;
+                    sql += `  id INTEGER PRIMARY KEY AUTOINCREMENT,\n`;
+                    sql += `  data JSON NOT NULL,\n`;
+                    sql += `  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n`;
+                    sql += `  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP\n`;
+                    sql += ');\n\n';
+
+                    // Add JSON validation constraint
+                    sql += `-- JSON validation constraint\n`;
+                    sql += `CREATE TRIGGER validate_${tableName}_json\n`;
+                    sql += `  BEFORE INSERT ON ${tableName}\n`;
+                    sql += `  WHEN json_valid(NEW.data) = 0\n`;
+                    sql += `BEGIN\n`;
+                    sql += `  SELECT RAISE(ABORT, 'Invalid JSON data');\n`;
+                    sql += `END;\n\n`;
+
+                    // Add updated_at trigger
+                    sql += `-- Auto-update updated_at timestamp\n`;
+                    sql += `CREATE TRIGGER update_${tableName}_timestamp\n`;
+                    sql += `  AFTER UPDATE ON ${tableName}\n`;
+                    sql += `BEGIN\n`;
+                    sql += `  UPDATE ${tableName} SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;\n`;
+                    sql += `END;\n\n`;
+
+                    // Add indexes for common JSON paths
+                    const fields = table.data.properties.fields || [];
+                    this.generateJSONIndexes(sql, tableName, fields);
+
+                    if (table.data.properties.description) {
+                        sql += `-- Table description: ${table.data.properties.description}\n`;
+                    }
+
+                    // Add sample JSON structure as comment
+                    sql += `-- Expected JSON structure:\n`;
+                    sql += `-- ${JSON.stringify(this.generateSampleJSON(fields), null, 2).split('\n').map(line => `--   ${line}`).join('\n')}\n\n`;
+
+                    // Add common query examples
+                    sql += `-- Common queries for ${tableName}:\n`;
+                    this.generateQueryExamples(sql, tableName, fields);
+                    sql += '\n';
+                });
+
+                document.getElementById('sqlOutput').textContent = sql;
+            }
+
+            generateJSONIndexes(sql, tableName, fields) {
+                const indexableFields = fields.filter(field => 
+                    ['string', 'integer', 'datetime'].includes(field.type) && field.required
+                );
+
+                indexableFields.forEach(field => {
+                    sql += `-- Index for frequently queried field: ${field.name}\n`;
+                    sql += `CREATE INDEX idx_${tableName}_${field.name} ON ${tableName}(json_extract(data, '$.${field.name}'));\n\n`;
+                });
+            }
+
+            generateQueryExamples(sql, tableName, fields) {
+                sql += `-- SELECT all records: SELECT id, data FROM ${tableName};\n`;
+                
+                const stringFields = fields.filter(f => f.type === 'string');
+                if (stringFields.length > 0) {
+                    const field = stringFields[0];
+                    sql += `-- SELECT by ${field.name}: SELECT * FROM ${tableName} WHERE json_extract(data, '$.${field.name}') = 'value';\n`;
+                }
+
+                const intFields = fields.filter(f => f.type === 'integer');
+                if (intFields.length > 0) {
+                    const field = intFields[0];
+                    sql += `-- SELECT by ${field.name}: SELECT * FROM ${tableName} WHERE json_extract(data, '$.${field.name}') = 123;\n`;
+                }
+
+                sql += `-- INSERT: INSERT INTO ${tableName} (data) VALUES (json('{"key": "value"}'));\n`;
+                sql += `-- UPDATE: UPDATE ${tableName} SET data = json_patch(data, '{"key": "new_value"}') WHERE id = 1;\n`;
+            }
+
+            generateSampleJSON(fields) {
+                const sample = {};
+                
+                fields.forEach(field => {
+                    switch (field.type) {
+                        case 'string':
+                            sample[field.name] = 'example_string';
+                            break;
+                        case 'integer':
+                            sample[field.name] = 123;
+                            break;
+                        case 'boolean':
+                            sample[field.name] = true;
+                            break;
+                        case 'datetime':
+                            sample[field.name] = '2024-01-01T12:00:00Z';
+                            break;
+                        case 'object':
+                            sample[field.name] = field.fields && field.fields.length > 0 
+                                ? this.generateSampleJSON(field.fields)
+                                : {};
+                            break;
+                        case 'array':
+                            if (field.itemType === 'object' && field.fields && field.fields.length > 0) {
+                                sample[field.name] = [this.generateSampleJSON(field.fields)];
+                            } else {
+                                sample[field.name] = field.itemType === 'string' ? ['item1', 'item2'] 
+                                                   : field.itemType === 'integer' ? [1, 2, 3]
+                                                   : field.itemType === 'boolean' ? [true, false]
+                                                   : [];
+                            }
+                            break;
+                    }
+                });
+
+                return sample;
+            }
+
+
+            clearCanvas() {
+                if (confirm('캔버스를 초기화하시겠습니까?')) {
+                    this.canvas.innerHTML = '';
+                    this.nodes.clear();
+                    this.nodeCounter = 0;
+                    this.fieldCounter = 0;
+                    document.getElementById('jsonOutput').textContent = '{\n  "type": "object",\n  "properties": {}\n}';
+                    document.getElementById('sqlOutput').textContent = '-- JSON 기반 SQLite 스키마가 여기에 생성됩니다\n-- 모든 데이터는 JSON 컬럼에 저장되며 SQLite JSON 함수로 쿼리할 수 있습니다';
+                }
+            }
+        }
+
+        // Initialize the editor
+        document.addEventListener('DOMContentLoaded', () => {
+            new SchemaEditor();
+        });
+    </script>
+</body>
+</html>

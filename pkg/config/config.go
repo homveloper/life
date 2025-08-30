@@ -125,7 +125,7 @@ func Load() (*Config, error) {
 // setDefaults sets default configuration values
 func setDefaults() {
 	// Server defaults
-	viper.SetDefault("server.port", 80)
+	viper.SetDefault("server.port", 8080)
 	viper.SetDefault("server.host", "localhost")
 	viper.SetDefault("server.environment", "development")
 	viper.SetDefault("server.metrics_enabled", true)
