@@ -647,3 +647,26 @@ func generateRandomState() string {
 	}
 	return hex.EncodeToString(bytes)
 }
+
+// === AutoRouter Compatible Methods ===
+// These methods are designed to work with the autorouter package
+
+// GuestLogin handles guest login (autorouter compatible)
+func (h *AuthHandler) GuestLogin(w http.ResponseWriter, r *http.Request) {
+	h.HandleGuestLogin(w, r)
+}
+
+// LinkSocial handles social linking (autorouter compatible)
+func (h *AuthHandler) LinkSocial(w http.ResponseWriter, r *http.Request) {
+	h.HandleLinkSocial(w, r)
+}
+
+// OAuthStart handles OAuth start (autorouter compatible)
+func (h *AuthHandler) OAuthStart(w http.ResponseWriter, r *http.Request) {
+	h.HandleOAuthStart(w, r)
+}
+
+// OAuthCallback handles OAuth callback (autorouter compatible)
+func (h *AuthHandler) OAuthCallback(w http.ResponseWriter, r *http.Request) {
+	h.HandleOAuthCallback(w, r)
+}

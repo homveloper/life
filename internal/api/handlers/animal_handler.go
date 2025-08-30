@@ -179,3 +179,26 @@ func (h *AnimalHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 
 	jsonrpcx.Success(w, req.ID, result)
 }
+
+// === AutoRouter Compatible Methods ===
+// These methods are designed to work with the autorouter package
+
+// Spawn handles animal spawning (autorouter compatible)
+func (h *AnimalHandler) Spawn(w http.ResponseWriter, r *http.Request) {
+	h.HandleSpawn(w, r)
+}
+
+// Get handles animal retrieval (autorouter compatible)
+func (h *AnimalHandler) Get(w http.ResponseWriter, r *http.Request) {
+	h.HandleGet(w, r)
+}
+
+// Capture handles animal capture (autorouter compatible)
+func (h *AnimalHandler) Capture(w http.ResponseWriter, r *http.Request) {
+	h.HandleCapture(w, r)
+}
+
+// List handles animal listing (autorouter compatible)
+func (h *AnimalHandler) List(w http.ResponseWriter, r *http.Request) {
+	h.HandleList(w, r)
+}

@@ -50,3 +50,11 @@ func (h *ServerHandler) HandleServerInfo(w http.ResponseWriter, r *http.Request)
 
 	jsonrpcx.Success(w, req.ID, response)
 }
+
+// === AutoRouter Compatible Methods ===
+// These methods are designed to work with the autorouter package
+
+// Info handles server info retrieval (autorouter compatible)
+func (h *ServerHandler) Info(w http.ResponseWriter, r *http.Request) {
+	h.HandleServerInfo(w, r)
+}

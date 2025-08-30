@@ -11,6 +11,7 @@ import (
 	"github.com/ThreeDotsLabs/watermill-redisstream/pkg/redisstream"
 	"github.com/ThreeDotsLabs/watermill/components/cqrs"
 	"github.com/ThreeDotsLabs/watermill/message"
+	"github.com/samber/oops"
 	httpSwagger "github.com/swaggo/http-swagger"
 	"go.uber.org/zap"
 
@@ -20,6 +21,7 @@ import (
 	cqrshandlers "github.com/danghamo/life/internal/cqrs/handlers"
 	"github.com/danghamo/life/internal/domain/account"
 	"github.com/danghamo/life/internal/domain/trainer"
+	"github.com/danghamo/life/pkg/autorouter"
 	"github.com/danghamo/life/pkg/logger"
 	"github.com/danghamo/life/pkg/redisx"
 	"github.com/danghamo/life/pkg/sse"
@@ -57,7 +59,7 @@ type ServerConfig struct {
 }
 
 // NewServer creates a new HTTP server
-func NewServer(config ServerConfig, logger *logger.Logger, redisClient *redisx.Client) *Server {
+func NewServer(config ServerConfig, logger *logger.Logger, redisClient *redisx.Client) (*Server, error) {
 	mux := http.NewServeMux()
 	apiLogger := logger.WithComponent("api")
 
@@ -124,7 +126,7 @@ func NewServer(config ServerConfig, logger *logger.Logger, redisClient *redisx.C
 		watermillLogger,
 	)
 	if err != nil {
-		panic(fmt.Sprintf("Failed to create publisher: %v", err))
+		return nil, oops.With("component", "publisher").With("operation", "create_publisher").Hint("Failed to create Redis stream publisher").Wrap(err)
 	}
 
 	subscriber, err := redisstream.NewSubscriber(
@@ -135,7 +137,7 @@ func NewServer(config ServerConfig, logger *logger.Logger, redisClient *redisx.C
 		watermillLogger,
 	)
 	if err != nil {
-		panic(fmt.Sprintf("Failed to create subscriber: %v", err))
+		return nil, oops.With("component", "subscriber").With("operation", "create_subscriber").Hint("Failed to create Redis stream subscriber").Wrap(err)
 	}
 
 	// Create message router with short close timeout
@@ -143,7 +145,7 @@ func NewServer(config ServerConfig, logger *logger.Logger, redisClient *redisx.C
 		CloseTimeout: 5 * time.Second, // Short timeout for graceful shutdown
 	}, watermillLogger)
 	if err != nil {
-		panic(fmt.Sprintf("Failed to create router: %v", err))
+		return nil, oops.With("component", "router").With("operation", "create_router").Hint("Failed to create message router").Wrap(err)
 	}
 
 	// Create command bus
@@ -158,7 +160,7 @@ func NewServer(config ServerConfig, logger *logger.Logger, redisClient *redisx.C
 		},
 	)
 	if err != nil {
-		panic(fmt.Sprintf("Failed to create command bus: %v", err))
+		return nil, oops.With("component", "command_bus").With("operation", "create_command_bus").Hint("Failed to create CQRS command bus").Wrap(err)
 	}
 
 	// Create event bus
@@ -173,7 +175,7 @@ func NewServer(config ServerConfig, logger *logger.Logger, redisClient *redisx.C
 		},
 	)
 	if err != nil {
-		panic(fmt.Sprintf("Failed to create event bus: %v", err))
+		return nil, oops.With("component", "event_bus").With("operation", "create_event_bus").Hint("Failed to create CQRS event bus").Wrap(err)
 	}
 
 	// Create command processor
@@ -191,7 +193,7 @@ func NewServer(config ServerConfig, logger *logger.Logger, redisClient *redisx.C
 		},
 	)
 	if err != nil {
-		panic(fmt.Sprintf("Failed to create command processor: %v", err))
+		return nil, oops.With("component", "command_processor").With("operation", "create_command_processor").Hint("Failed to create CQRS command processor").Wrap(err)
 	}
 
 	// Create event processor
@@ -209,7 +211,7 @@ func NewServer(config ServerConfig, logger *logger.Logger, redisClient *redisx.C
 		},
 	)
 	if err != nil {
-		panic(fmt.Sprintf("Failed to create event processor: %v", err))
+		return nil, oops.With("component", "event_processor").With("operation", "create_event_processor").Hint("Failed to create CQRS event processor").Wrap(err)
 	}
 
 	// Create SSE broadcaster
@@ -256,61 +258,109 @@ func NewServer(config ServerConfig, logger *logger.Logger, redisClient *redisx.C
 		cqrs.NewEventHandler("SSENotificationEvent", sseEventHandler.HandleSSENotificationEvent),
 	)
 	if err != nil {
-		panic(fmt.Sprintf("Failed to register event handlers: %v", err))
+		return nil, oops.With("component", "event_handlers").With("operation", "register_event_handlers").Hint("Failed to register CQRS event handlers for SSE broadcasting").Wrap(err)
 	}
 
-	server.setupRoutes()
+	if err := server.setupRoutes(); err != nil {
+		return nil, oops.With("component", "server").With("operation", "setup_routes").Hint("Failed to setup HTTP routes during server initialization").Wrap(err)
+	}
 	server.setupMiddleware()
 
-	return server
+	return server, nil
 }
 
 // setupRoutes configures the server routes
-func (s *Server) setupRoutes() {
+func (s *Server) setupRoutes() error {
 	// Health check endpoint (pure REST)
 	s.mux.HandleFunc("/health", s.healthCheckHandler)
 
 	// Swagger documentation endpoint
 	s.mux.HandleFunc("/swagger/", httpSwagger.WrapHandler)
 
-	// Server info endpoint (no auth required)
-	s.mux.HandleFunc("/api/v1/server.Info", s.serverHandler.HandleServerInfo)
-
 	// General purpose ping endpoint (hybrid)
 	s.mux.HandleFunc("/api/v1/ping", s.handlePing)
-
-	// OAuth endpoints (no auth required)
-	s.mux.HandleFunc("/api/v1/auth.OAuthStart", s.authHandler.HandleOAuthStart)
-	s.mux.HandleFunc("/api/v1/auth.OAuthCallback", s.authHandler.HandleOAuthCallback)
-
-	// Guest login (no auth required)
-	s.mux.HandleFunc("/api/v1/auth.GuestLogin", s.authHandler.HandleGuestLogin)
-
-	// Social linking (auth required - guest accounts only)
-	s.mux.Handle("/api/v1/auth.LinkSocial", s.authMiddleware.RequireAuth(http.HandlerFunc(s.authHandler.HandleLinkSocial)))
-
-	// Trainer endpoints (JWT auth required)
-	s.mux.Handle("/api/v1/trainer.Create", s.authMiddleware.RequireAuth(http.HandlerFunc(s.trainerHandler.HandleCreate)))
-	s.mux.Handle("/api/v1/trainer.Get", s.authMiddleware.RequireAuth(http.HandlerFunc(s.trainerHandler.HandleGet)))
-	s.mux.Handle("/api/v1/trainer.Move", s.authMiddleware.RequireAuth(http.HandlerFunc(s.trainerHandler.HandleMove)))
-	s.mux.Handle("/api/v1/trainer.FetchPosition", s.authMiddleware.RequireAuth(http.HandlerFunc(s.trainerHandler.HandleFetchPosition)))
-	s.mux.Handle("/api/v1/trainer.List", s.authMiddleware.RequireAuth(http.HandlerFunc(s.trainerHandler.HandleList)))
-	s.mux.Handle("/api/v1/trainer.Status", s.authMiddleware.RequireAuth(http.HandlerFunc(s.trainerHandler.HandleStatus)))
-
-	// Animal endpoints (JWT auth required)
-	s.mux.Handle("/api/v1/animal.Spawn", s.authMiddleware.RequireAuth(http.HandlerFunc(s.animalHandler.HandleSpawn)))
-	s.mux.Handle("/api/v1/animal.Get", s.authMiddleware.RequireAuth(http.HandlerFunc(s.animalHandler.HandleGet)))
-	s.mux.Handle("/api/v1/animal.Capture", s.authMiddleware.RequireAuth(http.HandlerFunc(s.animalHandler.HandleCapture)))
-	s.mux.Handle("/api/v1/animal.List", s.authMiddleware.RequireAuth(http.HandlerFunc(s.animalHandler.HandleList)))
-
-	// World endpoints (JWT auth required)
-	s.mux.Handle("/api/v1/world.Get", s.authMiddleware.RequireAuth(http.HandlerFunc(s.worldHandler.HandleGet)))
 
 	// Static file serving for client
 	s.mux.HandleFunc("/", s.handleStaticFiles)
 
 	// SSE endpoint for real-time updates (uses dedicated SSE auth middleware)
 	s.mux.Handle("/api/v1/stream/positions", s.authMiddleware.RequireSSEAuth(http.HandlerFunc(s.sseBroadcaster.HandleSSE)))
+
+	// === Auto-Router Registration ===
+	s.logger.Info("Setting up auto-router endpoints...")
+
+	// Convert middleware to autorouter.Middleware type
+	authMiddleware := func(next http.Handler) http.Handler {
+		return s.authMiddleware.RequireAuth(next)
+	}
+
+	// Server endpoints (no auth required)
+	if err := autorouter.QuickRegister(s.mux, "/api/v1/", "server.", s.serverHandler); err != nil {
+		return oops.With("handler", "server").With("operation", "register_routes").Hint("Failed to register server handler endpoints").Wrap(err)
+	}
+
+	// Auth endpoints (no auth required)
+	if err := autorouter.QuickRegister(s.mux, "/api/v1/", "auth.", s.authHandler); err != nil {
+		return oops.With("handler", "auth").With("operation", "register_routes").Hint("Failed to register auth handler endpoints").Wrap(err)
+	}
+
+	// Trainer endpoints (auth required)
+	if err := autorouter.QuickRegisterWithAuth(s.mux, "/api/v1/", "trainer.", s.trainerHandler, authMiddleware); err != nil {
+		return oops.With("handler", "trainer").With("operation", "register_routes_with_auth").Hint("Failed to register trainer handler endpoints with authentication").Wrap(err)
+	}
+
+	// Animal endpoints (auth required)
+	if err := autorouter.QuickRegisterWithAuth(s.mux, "/api/v1/", "animal.", s.animalHandler, authMiddleware); err != nil {
+		return oops.With("handler", "animal").With("operation", "register_routes_with_auth").Hint("Failed to register animal handler endpoints with authentication").Wrap(err)
+	}
+
+	// World endpoints (auth required)
+	if err := autorouter.QuickRegisterWithAuth(s.mux, "/api/v1/", "world.", s.worldHandler, authMiddleware); err != nil {
+		return oops.With("handler", "world").With("operation", "register_routes_with_auth").Hint("Failed to register world handler endpoints with authentication").Wrap(err)
+	}
+
+	// Print all registered handlers for debugging
+	s.printAutoRegisteredHandlers()
+	
+	s.logger.Info("Auto-router endpoints setup completed successfully")
+	return nil
+}
+
+// printAutoRegisteredHandlers prints all auto-registered handlers for debugging
+func (s *Server) printAutoRegisteredHandlers() {
+	router := autorouter.NewAutoRouter(s.mux, autorouter.RegistrationOptions{
+		Prefix: "/api/v1/",
+	})
+
+	s.logger.Info("=== Auto-Registered API Endpoints ===")
+	
+	// Print each handler's endpoints
+	handlers := []struct {
+		name    string
+		handler interface{}
+		hasAuth bool
+	}{
+		{"Server", s.serverHandler, false},
+		{"Auth", s.authHandler, false},
+		{"Trainer", s.trainerHandler, true},
+		{"Animal", s.animalHandler, true},
+		{"World", s.worldHandler, true},
+	}
+
+	for _, h := range handlers {
+		authStatus := ""
+		if h.hasAuth {
+			authStatus = " [AUTH REQUIRED]"
+		}
+		s.logger.Info(fmt.Sprintf("%s Endpoints%s:", h.name, authStatus))
+		
+		handlerInfos := router.GetRegisteredHandlers(h.handler)
+		for _, info := range handlerInfos {
+			s.logger.Info(fmt.Sprintf("  %s -> %s", info.URLPath, info.MethodName))
+		}
+	}
+	
+	s.logger.Info("=====================================")
 }
 
 // setupMiddleware applies middleware to all routes

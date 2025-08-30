@@ -66,3 +66,11 @@ func (h *WorldHandler) HandleGet(w http.ResponseWriter, r *http.Request) {
 
 	jsonrpcx.Success(w, req.ID, result)
 }
+
+// === AutoRouter Compatible Methods ===
+// These methods are designed to work with the autorouter package
+
+// Get handles world retrieval (autorouter compatible)
+func (h *WorldHandler) Get(w http.ResponseWriter, r *http.Request) {
+	h.HandleGet(w, r)
+}

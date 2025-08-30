@@ -76,7 +76,10 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	apiServer := api.NewServer(serverConfig, log, redisClient)
+	apiServer, err := api.NewServer(serverConfig, log, redisClient)
+	if err != nil {
+		log.Fatal("Failed to create API server", zap.Error(err))
+	}
 
 	// Create context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())

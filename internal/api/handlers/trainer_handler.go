@@ -660,3 +660,36 @@ func (h *TrainerHandler) createTrainerChanges(original, updated *trainer.Trainer
 
 	return changes, nil
 }
+
+// === AutoRouter Compatible Methods ===
+// These methods are designed to work with the autorouter package
+
+// Create handles trainer creation (autorouter compatible)
+func (h *TrainerHandler) Create(w http.ResponseWriter, r *http.Request) {
+	h.HandleCreate(w, r)
+}
+
+// Get handles trainer retrieval (autorouter compatible)
+func (h *TrainerHandler) Get(w http.ResponseWriter, r *http.Request) {
+	h.HandleGet(w, r)
+}
+
+// Move handles trainer movement (autorouter compatible)
+func (h *TrainerHandler) Move(w http.ResponseWriter, r *http.Request) {
+	h.HandleMove(w, r)
+}
+
+// FetchPosition handles position fetching (autorouter compatible)
+func (h *TrainerHandler) FetchPosition(w http.ResponseWriter, r *http.Request) {
+	h.HandleFetchPosition(w, r)
+}
+
+// List handles trainer listing (autorouter compatible)
+func (h *TrainerHandler) List(w http.ResponseWriter, r *http.Request) {
+	h.HandleList(w, r)
+}
+
+// Status handles trainer status (autorouter compatible)
+func (h *TrainerHandler) Status(w http.ResponseWriter, r *http.Request) {
+	h.HandleStatus(w, r)
+}
