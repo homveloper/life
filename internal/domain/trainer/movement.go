@@ -8,7 +8,8 @@ import (
 
 // MovementDirection represents movement direction
 type MovementDirection struct {
-	X, Y float64 // Direction vector (-1, 0, 1)
+	X float64 `json:"x"` // Direction vector (-1, 0, 1)
+	Y float64 `json:"y"` // Direction vector (-1, 0, 1)
 }
 
 // MovementState represents trainer's current movement state

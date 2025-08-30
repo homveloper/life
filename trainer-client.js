@@ -33,7 +33,7 @@ let isCurrentlyMoving = false;
 
 // Movement update debouncing
 let movementUpdateTimeout = null;
-const MOVEMENT_UPDATE_DELAY = 50; // 50ms debounce for smoother diagonal movement
+const MOVEMENT_UPDATE_DELAY = 100; // 100ms debounce for smoother diagonal movement and reduced server load
 
 // Pressed keys tracking
 let pressedKeys = new Set();
@@ -198,15 +198,28 @@ async function move(dirX, dirY) {
         const currentTime = now;
         const startTime = new Date(trainerState.movement.start_time);
         const elapsed = Math.max(0, (currentTime - startTime) / 1000); // seconds
-        const distance = trainerState.movement.speed * elapsed;
+        const speed = trainerState.movement.speed || 5.0;
+        const distance = speed * elapsed;
+        
+        // Validate direction values to prevent NaN
+        const dirX = (typeof trainerState.movement.direction.x === 'number' && !isNaN(trainerState.movement.direction.x)) 
+            ? trainerState.movement.direction.x : 0;
+        const dirY = (typeof trainerState.movement.direction.y === 'number' && !isNaN(trainerState.movement.direction.y)) 
+            ? trainerState.movement.direction.y : 0;
         
         newStartPos = {
-            x: trainerState.movement.start_pos.x + (trainerState.movement.direction.x * distance),
-            y: trainerState.movement.start_pos.y + (trainerState.movement.direction.y * distance)
+            x: trainerState.movement.start_pos.x + (dirX * distance),
+            y: trainerState.movement.start_pos.y + (dirY * distance)
         };
         
-        // Update position to the interpolated position for smooth transition
-        trainerState.position = { ...newStartPos };
+        // Validate calculated position to prevent NaN
+        if (isNaN(newStartPos.x) || isNaN(newStartPos.y)) {
+            console.warn('Invalid interpolated position calculated, using current position');
+            newStartPos = { ...trainerState.position };
+        } else {
+            // Update position to the interpolated position for smooth transition
+            trainerState.position = { ...newStartPos };
+        }
     }
     
     trainerState.movement = {
@@ -216,6 +229,15 @@ async function move(dirX, dirY) {
         start_pos: newStartPos,
         is_moving: true
     };
+    
+    // Debug logging for diagonal movement
+    if (dirX !== 0 && dirY !== 0) {
+        console.log('Starting diagonal movement:', {
+            direction: { x: dirX, y: dirY },
+            start_pos: newStartPos,
+            current_pos: trainerState.position
+        });
+    }
     updateUI(); // Immediate visual feedback
     
     try {
@@ -368,11 +390,20 @@ async function fetchPosition() {
             // Don't overwrite movement state if we're actively moving via keyboard
             if (pressedKeys.size === 0 || !isCurrentlyMoving) {
                 trainerState.movement = syncData.movement;
-                // Validate direction
-                if (!trainerState.movement.direction ||
-                    isNaN(trainerState.movement.direction.x) || 
-                    isNaN(trainerState.movement.direction.y)) {
+                // Validate direction, handling both lowercase and uppercase field names
+                if (!trainerState.movement.direction) {
                     trainerState.movement.direction = { x: 0, y: 0 };
+                } else {
+                    // Handle both {x,y} and {X,Y} field names for backward compatibility
+                    const dirX = trainerState.movement.direction.x !== undefined ? trainerState.movement.direction.x : trainerState.movement.direction.X;
+                    const dirY = trainerState.movement.direction.y !== undefined ? trainerState.movement.direction.y : trainerState.movement.direction.Y;
+                    
+                    if (isNaN(dirX) || isNaN(dirY)) {
+                        trainerState.movement.direction = { x: 0, y: 0 };
+                    } else {
+                        // Normalize to lowercase field names
+                        trainerState.movement.direction = { x: dirX, y: dirY };
+                    }
                 }
             } else {
                 // Only update non-conflicting movement data (like speed) while preserving client prediction
@@ -391,61 +422,135 @@ async function fetchPosition() {
     }
 }
 
-// JSON merge patch application
+// JSON merge patch application using standard library
 function applyChanges(changes) {
     if (!changes) return;
     
     console.log('Applying changes:', changes);
     
-    // Apply position changes with validation
-    if (changes.position) {
-        const newPos = { ...trainerState.position, ...changes.position };
-        // Validate position values
-        if (typeof newPos.x === 'number' && !isNaN(newPos.x) && 
-            typeof newPos.y === 'number' && !isNaN(newPos.y)) {
-            trainerState.position = newPos;
-        } else {
-            console.warn('Invalid position in changes:', newPos);
+    // Don't apply movement changes if we're actively moving via keyboard
+    if (changes.movement && (pressedKeys.size > 0 && isCurrentlyMoving)) {
+        // Only update non-conflicting movement data while preserving client prediction
+        const filteredChanges = { ...changes };
+        delete filteredChanges.movement; // Remove movement to preserve client prediction
+        
+        // But allow specific movement fields that don't conflict
+        if (changes.movement.speed) {
+            if (!filteredChanges.movement) filteredChanges.movement = {};
+            filteredChanges.movement.speed = changes.movement.speed;
         }
+        if (changes.movement.start_pos) {
+            if (!filteredChanges.movement) filteredChanges.movement = {};
+            filteredChanges.movement.start_pos = changes.movement.start_pos;
+        }
+        
+        console.log('Preserving client movement state during keyboard input, filtered changes:', filteredChanges);
+        changes = filteredChanges;
     }
     
-    // Apply movement changes with validation, but preserve active keyboard input
-    if (changes.movement) {
-        // Don't overwrite movement state if we're actively moving via keyboard
-        if (pressedKeys.size === 0 || !isCurrentlyMoving) {
-            const newMovement = { ...trainerState.movement, ...changes.movement };
-            // Validate direction values
-            if (newMovement.direction) {
-                if (typeof newMovement.direction.x === 'number' && !isNaN(newMovement.direction.x) &&
-                    typeof newMovement.direction.y === 'number' && !isNaN(newMovement.direction.y)) {
-                    trainerState.movement = newMovement;
-                } else {
-                    console.warn('Invalid movement direction:', newMovement.direction);
+    // Use fast-json-patch library for JSON patch operations
+    if (window.jsonpatch) {
+        try {
+            // Create a deep copy of current state
+            let newState = JSON.parse(JSON.stringify(trainerState));
+            
+            // Apply changes using object merge (similar to JSON merge patch)
+            function deepMerge(target, source) {
+                for (const key in source) {
+                    if (source[key] === null) {
+                        delete target[key];
+                    } else if (typeof source[key] === 'object' && !Array.isArray(source[key]) && source[key] !== null) {
+                        target[key] = target[key] || {};
+                        deepMerge(target[key], source[key]);
+                    } else {
+                        target[key] = source[key];
+                    }
                 }
+                return target;
+            }
+            
+            // Apply merge patch logic
+            trainerState = deepMerge(newState, changes);
+            
+            // Validate critical fields after merge
+            if (!trainerState.position || isNaN(trainerState.position.x) || isNaN(trainerState.position.y)) {
+                console.warn('Invalid position after merge patch, resetting:', trainerState.position);
+                trainerState.position = { x: 15.0, y: 10.0 };
+            }
+            
+            if (!trainerState.movement) {
+                trainerState.movement = {
+                    direction: { x: 0, y: 0 },
+                    speed: 5.0,
+                    start_time: null,
+                    start_pos: trainerState.position,
+                    is_moving: false
+                };
+            } else if (!trainerState.movement.direction) {
+                trainerState.movement.direction = { x: 0, y: 0 };
             } else {
-                trainerState.movement = newMovement;
+                // Handle case sensitivity issues - normalize to lowercase
+                if (trainerState.movement.direction.X !== undefined) {
+                    trainerState.movement.direction.x = trainerState.movement.direction.X;
+                    delete trainerState.movement.direction.X;
+                }
+                if (trainerState.movement.direction.Y !== undefined) {
+                    trainerState.movement.direction.y = trainerState.movement.direction.Y;
+                    delete trainerState.movement.direction.Y;
+                }
+                
+                // Validate direction values
+                if (isNaN(trainerState.movement.direction.x) || isNaN(trainerState.movement.direction.y)) {
+                    console.warn('Invalid direction values after merge, resetting:', trainerState.movement.direction);
+                    trainerState.movement.direction = { x: 0, y: 0 };
+                }
             }
-        } else {
-            // Only update non-conflicting movement data while preserving client prediction
-            if (changes.movement.speed) {
-                trainerState.movement.speed = changes.movement.speed;
+            
+            // Debug log for position issues
+            if (trainerState.position.x === 0 || trainerState.position.y === 0) {
+                console.warn('Position set to X,0 or 0,Y after merge patch:', {
+                    position: trainerState.position,
+                    changes: changes
+                });
             }
-            // Update position-related data if present
-            if (changes.movement.start_pos) {
-                trainerState.movement.start_pos = changes.movement.start_pos;
-            }
-            console.log('Preserving client movement state during keyboard input (applyChanges)');
+            
+        } catch (error) {
+            console.error('JSON merge patch failed:', error, 'Changes:', changes);
+            // Fallback to manual merging if library fails
+            fallbackApplyChanges(changes);
+        }
+    } else {
+        console.warn('fast-json-patch library not loaded, using fallback');
+        fallbackApplyChanges(changes);
+    }
+    
+    updateUI();
+}
+
+// Fallback manual merge function  
+function fallbackApplyChanges(changes) {
+    // Apply position changes
+    if (changes.position) {
+        trainerState.position = { ...trainerState.position, ...changes.position };
+    }
+    
+    // Apply movement changes
+    if (changes.movement) {
+        trainerState.movement = { ...trainerState.movement, ...changes.movement };
+        if (changes.movement.direction) {
+            trainerState.movement.direction = { 
+                ...trainerState.movement.direction, 
+                ...changes.movement.direction 
+            };
         }
     }
     
-    // Apply other state changes
+    // Apply other changes
     Object.keys(changes).forEach(key => {
         if (key !== 'position' && key !== 'movement') {
             trainerState[key] = changes[key];
         }
     });
-    
-    updateUI();
 }
 
 // UI Updates with camera following
@@ -515,14 +620,28 @@ function interpolatePosition() {
     const startTime = new Date(trainerState.movement.start_time);
     const elapsed = (now - startTime) / 1000; // seconds
     
-    const distance = trainerState.movement.speed * elapsed;
-    const newX = trainerState.movement.start_pos.x + (trainerState.movement.direction.x * distance);
-    const newY = trainerState.movement.start_pos.y + (trainerState.movement.direction.y * distance);
+    const speed = trainerState.movement.speed || 5.0;
+    const distance = speed * elapsed;
     
+    // Validate direction values to prevent NaN
+    const dirX = (typeof trainerState.movement.direction.x === 'number' && !isNaN(trainerState.movement.direction.x)) 
+        ? trainerState.movement.direction.x : 0;
+    const dirY = (typeof trainerState.movement.direction.y === 'number' && !isNaN(trainerState.movement.direction.y)) 
+        ? trainerState.movement.direction.y : 0;
     
-    // Update position for smooth animation - temporarily disable boundary check for debugging
-    trainerState.position.x = newX;
-    trainerState.position.y = newY;
+    const newX = trainerState.movement.start_pos.x + (dirX * distance);
+    const newY = trainerState.movement.start_pos.y + (dirY * distance);
+    
+    // Validate calculated position to prevent NaN
+    if (!isNaN(newX) && !isNaN(newY)) {
+        trainerState.position.x = newX;
+        trainerState.position.y = newY;
+    } else {
+        console.warn('Invalid position calculated during interpolation, stopping movement');
+        // Stop movement if invalid position is calculated
+        trainerState.movement.is_moving = false;
+        trainerState.movement.direction = { x: 0, y: 0 };
+    }
     
     updateUI();
 }
@@ -808,11 +927,20 @@ async function fetchInitialTrainerData() {
         // Validate and set movement
         if (trainer.movement) {
             trainerState.movement = trainer.movement;
-            // Ensure direction is valid
-            if (!trainerState.movement.direction || 
-                isNaN(trainerState.movement.direction.x) || 
-                isNaN(trainerState.movement.direction.y)) {
+            // Ensure direction is valid, handling both lowercase and uppercase field names
+            if (!trainerState.movement.direction) {
                 trainerState.movement.direction = { x: 0, y: 0 };
+            } else {
+                // Handle both {x,y} and {X,Y} field names for backward compatibility
+                const dirX = trainerState.movement.direction.x !== undefined ? trainerState.movement.direction.x : trainerState.movement.direction.X;
+                const dirY = trainerState.movement.direction.y !== undefined ? trainerState.movement.direction.y : trainerState.movement.direction.Y;
+                
+                if (isNaN(dirX) || isNaN(dirY)) {
+                    trainerState.movement.direction = { x: 0, y: 0 };
+                } else {
+                    // Normalize to lowercase field names
+                    trainerState.movement.direction = { x: dirX, y: dirY };
+                }
             }
         } else {
             trainerState.movement = {
@@ -849,7 +977,10 @@ function connectSSE() {
     eventSource = new EventSource(sseUrl);
     
     eventSource.onopen = function(event) {
+        console.log('SSE connection opened');
         showMessage('Real-time sync connected', 'success');
+        // Reset reconnection attempts on successful connection
+        window.sseReconnectAttempts = 0;
     };
     
     eventSource.onmessage = function(event) {
@@ -864,14 +995,24 @@ function connectSSE() {
     eventSource.onerror = function(event) {
         console.error('SSE connection error:', event);
         
-        if (eventSource.readyState === EventSource.CLOSED) {
+        if (eventSource.readyState === EventSource.CLOSED || eventSource.readyState === EventSource.CONNECTING) {
             showMessage('Real-time sync disconnected', 'error');
-            // Try to reconnect after a delay
+            
+            // Close existing connection if still open
+            if (eventSource.readyState !== EventSource.CLOSED) {
+                eventSource.close();
+            }
+            
+            // Try to reconnect with exponential backoff
+            const reconnectDelay = Math.min(30000, 1000 * Math.pow(2, (window.sseReconnectAttempts || 0)));
+            window.sseReconnectAttempts = (window.sseReconnectAttempts || 0) + 1;
+            
             setTimeout(() => {
                 if (authToken) { // Only reconnect if still authenticated
+                    console.log(`Attempting SSE reconnection (attempt ${window.sseReconnectAttempts})`);
                     connectSSE();
                 }
-            }, 5000);
+            }, reconnectDelay);
         }
     };
 }
@@ -883,9 +1024,25 @@ function disconnectSSE() {
     }
 }
 
-// Handle incoming SSE messages (JSON-RPC 2.0 notifications)
+// Handle incoming SSE messages (JSON-RPC 2.0 notifications and system messages)
 function handleSSEMessage(notification) {
     
+    // Handle system messages (non-JSON-RPC)
+    if (notification.type) {
+        switch (notification.type) {
+            case 'connected':
+                console.log('SSE connected with client ID:', notification.client_id);
+                return;
+            case 'heartbeat':
+                console.debug('SSE heartbeat received at:', notification.timestamp);
+                return;
+            default:
+                console.debug('Unknown SSE system message:', notification);
+                return;
+        }
+    }
+    
+    // Handle JSON-RPC 2.0 notifications
     if (!notification.jsonrpc || notification.jsonrpc !== '2.0') {
         console.warn('Invalid JSON-RPC notification:', notification);
         return;
