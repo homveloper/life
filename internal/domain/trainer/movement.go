@@ -13,18 +13,18 @@ type MovementDirection struct {
 
 // MovementState represents trainer's current movement state
 type MovementState struct {
-	Direction   MovementDirection `json:"direction"`    // Current direction
-	Speed       float64           `json:"speed"`        // Units per second
-	StartTime   time.Time         `json:"start_time"`   // When movement started
-	StartPos    shared.Position   `json:"start_pos"`    // Position when movement started
-	IsMoving    bool              `json:"is_moving"`    // Whether currently moving
+	Direction MovementDirection `json:"direction"`  // Current direction
+	Speed     float64           `json:"speed"`      // Units per second
+	StartTime time.Time         `json:"start_time"` // When movement started
+	StartPos  shared.Position   `json:"start_pos"`  // Position when movement started
+	IsMoving  bool              `json:"is_moving"`  // Whether currently moving
 }
 
 // NewMovementState creates a new movement state
 func NewMovementState() MovementState {
 	return MovementState{
 		Direction: MovementDirection{X: 0, Y: 0},
-		Speed:     2.0, // Default 2 units per second
+		Speed:     5.0, // Default 2 units per second
 		IsMoving:  false,
 	}
 }
