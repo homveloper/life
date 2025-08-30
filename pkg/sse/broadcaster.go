@@ -22,6 +22,7 @@ type SSEClient struct {
 	Flusher  http.Flusher
 	Done     chan bool
 	LastSeen time.Time
+	mutex    sync.Mutex // Protects concurrent writes to this client
 }
 
 // UserMessage represents a message targeted to a specific user
@@ -48,8 +49,8 @@ func NewSSEBroadcaster(logger *logger.Logger) *SSEBroadcaster {
 		logger:        logger.WithComponent("sse-broadcaster"),
 		clients:       make(map[string]*SSEClient),
 		userClients:   make(map[string][]*SSEClient),
-		broadcast:     make(chan []byte, 100),
-		userBroadcast: make(chan UserMessage, 100),
+		broadcast:     make(chan []byte, 1000),
+		userBroadcast: make(chan UserMessage, 1000),
 		cleanup:       time.NewTicker(30 * time.Second), // Cleanup every 30 seconds
 		shutdown:      make(chan struct{}),
 	}
@@ -310,11 +311,29 @@ func (b *SSEBroadcaster) sendToClient(client *SSEClient, data []byte) (err error
 		return fmt.Errorf("client flusher is nil")
 	}
 
-	_, err = fmt.Fprintf(client.Writer, "data: %s\n\n", data)
+	// Use client-specific mutex to prevent concurrent writes
+	client.mutex.Lock()
+	defer client.mutex.Unlock()
+	
+	// Check if client is still connected before writing
+	select {
+	case <-client.Done:
+		return fmt.Errorf("client connection closed")
+	default:
+	}
+	
+	// Write SSE data with proper formatting
+	// Use a single write operation to reduce chunking issues
+	sseData := fmt.Sprintf("data: %s\n\n", data)
+	n, err := client.Writer.Write([]byte(sseData))
 	if err != nil {
-		return err
+		return fmt.Errorf("write failed: %w", err)
+	}
+	if n != len(sseData) {
+		return fmt.Errorf("incomplete write: wrote %d/%d bytes", n, len(sseData))
 	}
 
+	// Force flush immediately
 	client.Flusher.Flush()
 	client.LastSeen = time.Now()
 	return nil
@@ -407,12 +426,14 @@ func (b *SSEBroadcaster) HandleSSE(w http.ResponseWriter, r *http.Request) {
 	
 	b.logger.Debug("SSE: Client supports flusher interface")
 
-	// Set SSE headers
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
+	// Set SSE headers with improved chunked encoding handling
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Headers", "Cache-Control")
+	w.Header().Set("X-Accel-Buffering", "no") // Disable nginx buffering
+	w.Header().Set("Transfer-Encoding", "chunked") // Explicit chunked encoding
 	
 	b.logger.Debug("SSE: Headers set successfully")
 
@@ -436,7 +457,8 @@ func (b *SSEBroadcaster) HandleSSE(w http.ResponseWriter, r *http.Request) {
 	b.logger.Debug("SSE: Client added to broadcaster")
 
 	// Send initial connection message
-	fmt.Fprintf(w, "data: {\"type\":\"connected\",\"client_id\":\"%s\"}\n\n", clientID)
+	initialMsg := fmt.Sprintf("data: {\"type\":\"connected\",\"client_id\":\"%s\"}\n\n", clientID)
+	w.Write([]byte(initialMsg))
 	flusher.Flush()
 	
 	b.logger.Debug("SSE: Initial message sent and flushed")
@@ -467,11 +489,17 @@ func (b *SSEBroadcaster) HandleSSE(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-}// sendHeartbeat sends a heartbeat message to the SSE client
+}
+
+// sendHeartbeat sends a heartbeat message to the SSE client
 func (b *SSEBroadcaster) sendHeartbeat(w http.ResponseWriter, flusher http.Flusher) error {
-	_, err := fmt.Fprintf(w, "data: {\"type\":\"heartbeat\",\"timestamp\":\"%s\"}\n\n", time.Now().Format(time.RFC3339))
+	heartbeatData := fmt.Sprintf("data: {\"type\":\"heartbeat\",\"timestamp\":\"%s\"}\n\n", time.Now().Format(time.RFC3339))
+	n, err := w.Write([]byte(heartbeatData))
 	if err != nil {
-		return err
+		return fmt.Errorf("heartbeat write failed: %w", err)
+	}
+	if n != len(heartbeatData) {
+		return fmt.Errorf("incomplete heartbeat write: wrote %d/%d bytes", n, len(heartbeatData))
 	}
 	flusher.Flush()
 	return nil
