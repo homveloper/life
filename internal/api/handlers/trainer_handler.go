@@ -5,11 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
+	"github.com/ThreeDotsLabs/watermill/components/cqrs"
+	jsonpatch "github.com/evanphx/json-patch/v5"
 	"go.uber.org/zap"
 
 	"github.com/danghamo/life/internal/api/jsonrpcx"
 	"github.com/danghamo/life/internal/api/middleware"
+	cqrscommands "github.com/danghamo/life/internal/cqrs"
+	"github.com/danghamo/life/internal/domain/shared"
 	"github.com/danghamo/life/internal/domain/trainer"
 	"github.com/danghamo/life/pkg/logger"
 )
@@ -18,6 +23,7 @@ import (
 type TrainerHandler struct {
 	logger     *logger.Logger
 	repository trainer.Repository
+	eventBus   *cqrs.EventBus
 }
 
 // getOrCreateTrainer gets an existing trainer or creates a default one for the user
@@ -63,10 +69,11 @@ func (h *TrainerHandler) getOrCreateTrainer(ctx context.Context, userID string, 
 }
 
 // NewTrainerHandler creates a new trainer handler
-func NewTrainerHandler(logger *logger.Logger, repository trainer.Repository) *TrainerHandler {
+func NewTrainerHandler(logger *logger.Logger, repository trainer.Repository, eventBus *cqrs.EventBus) *TrainerHandler {
 	return &TrainerHandler{
 		logger:     logger.WithComponent("trainer-handler"),
 		repository: repository,
+		eventBus:   eventBus,
 	}
 }
 
@@ -82,17 +89,28 @@ type GetTrainerRequest struct {
 type MoveTrainerRequest struct {
 	DirectionX float64 `json:"direction_x"` // -1, 0, or 1
 	DirectionY float64 `json:"direction_y"` // -1, 0, or 1
-	Action     string  `json:"action"`     // "start" or "stop"
+	Action     string  `json:"action"`      // "start" or "stop"
 }
 
 type ListTrainerRequest struct {
 	// No params needed for list
 }
 
+type FetchPositionRequest struct {
+	// No ID needed - we get it from JWT context
+}
+
+type FetchPositionResponse struct {
+	Position shared.Position       `json:"position"`
+	Movement trainer.MovementState `json:"movement"`
+}
+
 // Response structures for Swagger documentation
 type CreateTrainerResponse = trainer.Trainer
 type GetTrainerResponse = trainer.Trainer
-type MoveTrainerResponse = trainer.Trainer
+type MoveTrainerResponse struct {
+	Changes map[string]interface{} `json:"changes"`
+}
 type StatusTrainerResponse = trainer.Trainer
 
 type ListTrainerResponse struct {
@@ -280,6 +298,13 @@ func (h *TrainerHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get original trainer state for comparison
+	originalTrainer, err := h.repository.GetByID(r.Context(), trainer.UserID(userID))
+	if err != nil {
+		jsonrpcx.WithError(r, req.ID, jsonrpcx.InternalError, "Failed to get original trainer state")
+		return
+	}
+
 	// Handle movement command
 	var updatedTrainer *trainer.Trainer
 	trainerUserID := trainer.UserID(userID)
@@ -314,7 +339,47 @@ func (h *TrainerHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result := updatedTrainer
+	// Create JSON merge patch with only changed fields
+	changes, err := h.createTrainerChanges(originalTrainer, updatedTrainer)
+	if err != nil {
+		jsonrpcx.WithError(r, req.ID, jsonrpcx.InternalError, fmt.Sprintf("Failed to create changes patch: %v", err))
+		return
+	}
+
+	// Publish domain event for SSE broadcasting
+	requestID := fmt.Sprintf("%s-%d", userID, time.Now().UnixNano())
+	var event interface{}
+
+	if params.Action == "start" {
+		event = &cqrscommands.TrainerMovedEvent{
+			UserID:    userID,
+			Position:  updatedTrainer.Position,
+			Movement:  updatedTrainer.Movement,
+			Timestamp: time.Now(),
+			RequestID: requestID,
+			Changes:   changes,
+		}
+	} else {
+		event = &cqrscommands.TrainerStoppedEvent{
+			UserID:    userID,
+			Position:  updatedTrainer.Position,
+			Movement:  updatedTrainer.Movement,
+			Timestamp: time.Now(),
+			RequestID: requestID,
+			Changes:   changes,
+		}
+	}
+
+	// Publish event for SSE broadcasting
+	if err := h.eventBus.Publish(r.Context(), event); err != nil {
+		h.logger.Error("Failed to publish trainer movement event",
+			zap.Error(err),
+			zap.String("userId", userID),
+			zap.String("action", params.Action))
+		// Don't fail the request if event publishing fails
+	}
+
+	result := MoveTrainerResponse{Changes: changes}
 
 	h.logger.Info("Trainer movement command",
 		zap.String("userId", userID),
@@ -426,11 +491,89 @@ func (h *TrainerHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	jsonrpcx.Success(w, req.ID, result)
 }
 
+// HandleFetchPosition handles POST /api/v1/trainer.FetchPosition
+// @Summary Fetch trainer position and movement state
+// @Description Get current position and movement state for synchronization fallback
+// @Tags trainer
+// @Accept json
+// @Produce json
+// @Param request body jsonrpcx.RequestT[FetchPositionRequest] true "JSON-RPC request with FetchPositionRequest params"
+// @Success 200 {object} jsonrpcx.ResponseT[FetchPositionResponse] "Current position and movement state"
+// @Failure 400 {object} jsonrpcx.ErrorResponse "Invalid request parameters"
+// @Failure 401 {object} jsonrpcx.ErrorResponse "Authentication required"
+// @Failure 500 {object} jsonrpcx.ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /api/v1/trainer.FetchPosition [post]
+func (h *TrainerHandler) HandleFetchPosition(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		jsonrpcx.WithError(r, nil, jsonrpcx.MethodNotFound, "Method not allowed")
+		return
+	}
+
+	// Get user info from context
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		jsonrpcx.WithError(r, nil, jsonrpcx.InvalidRequest, "User not authenticated")
+		return
+	}
+
+	req, err := jsonrpcx.ParseRequest(r)
+	if err != nil {
+		jsonrpcx.WithError(r, nil, jsonrpcx.ParseError, "Invalid JSON-RPC request")
+		return
+	}
+
+	var params FetchPositionRequest
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		jsonrpcx.WithError(r, req.ID, jsonrpcx.InvalidParams, "Invalid params")
+		return
+	}
+
+	// Get trainer and update position from movement
+	trainerUserID := trainer.UserID(userID)
+	var currentTrainer *trainer.Trainer
+
+	err = h.repository.FindOneAndUpdate(r.Context(), trainerUserID, func(t *trainer.Trainer) (*trainer.Trainer, error) {
+		if t == nil {
+			return nil, fmt.Errorf("trainer not found")
+		}
+
+		// Update position from current movement state
+		t.UpdatePositionFromMovement()
+		currentTrainer = t
+		return t, nil
+	})
+
+	if err != nil {
+		// Try to get trainer without update (fallback for read-only access)
+		currentTrainer, err = h.getOrCreateTrainer(r.Context(), userID, "NewPlayer")
+		if err != nil {
+			jsonrpcx.WithError(r, req.ID, jsonrpcx.InternalError, "Failed to fetch trainer position")
+			return
+		}
+		// Update position calculation for response
+		currentTrainer.UpdatePositionFromMovement()
+	}
+
+	result := FetchPositionResponse{
+		Position: currentTrainer.Position,
+		Movement: currentTrainer.Movement,
+	}
+
+	h.logger.Debug("Fetched trainer position",
+		zap.String("userId", userID),
+		zap.Float64("x", currentTrainer.Position.X),
+		zap.Float64("y", currentTrainer.Position.Y),
+		zap.Bool("isMoving", currentTrainer.Movement.IsMoving))
+
+	jsonrpcx.Success(w, req.ID, result)
+}
+
 // validateDirection validates movement direction values
 func (h *TrainerHandler) validateDirection(dirX, dirY float64) error {
 	// Direction values must be -1, 0, or 1
 	validValues := []float64{-1, 0, 1}
-	
+
 	isValidX := false
 	for _, v := range validValues {
 		if dirX == v {
@@ -438,7 +581,7 @@ func (h *TrainerHandler) validateDirection(dirX, dirY float64) error {
 			break
 		}
 	}
-	
+
 	isValidY := false
 	for _, v := range validValues {
 		if dirY == v {
@@ -446,15 +589,15 @@ func (h *TrainerHandler) validateDirection(dirX, dirY float64) error {
 			break
 		}
 	}
-	
+
 	if !isValidX {
 		return fmt.Errorf("invalid direction_x: %f (must be -1, 0, or 1)", dirX)
 	}
-	
+
 	if !isValidY {
 		return fmt.Errorf("invalid direction_y: %f (must be -1, 0, or 1)", dirY)
 	}
-	
+
 	return nil
 }
 
@@ -484,4 +627,36 @@ func (h *TrainerHandler) validateMovement(x, y float64) error {
 	}
 
 	return nil
+}
+
+// createTrainerChanges creates a JSON merge patch containing only changed fields
+func (h *TrainerHandler) createTrainerChanges(original, updated *trainer.Trainer) (map[string]interface{}, error) {
+	if original == nil || updated == nil {
+		return nil, fmt.Errorf("original or updated trainer is nil")
+	}
+
+	// Marshal both trainers to JSON
+	originalJSON, err := json.Marshal(original)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal original trainer: %w", err)
+	}
+
+	updatedJSON, err := json.Marshal(updated)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal updated trainer: %w", err)
+	}
+
+	// Create merge patch using json-patch library
+	mergePatch, err := jsonpatch.CreateMergePatch(originalJSON, updatedJSON)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create merge patch: %w", err)
+	}
+
+	// Unmarshal merge patch to map
+	var changes map[string]interface{}
+	if err := json.Unmarshal(mergePatch, &changes); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal merge patch: %w", err)
+	}
+
+	return changes, nil
 }

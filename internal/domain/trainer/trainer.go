@@ -310,11 +310,11 @@ func NewTrainer(userID UserID, nickname Nickname) (*Trainer, error) {
 func (t *Trainer) StartMovement(dirX, dirY float64) error {
 	// Update current position before starting new movement
 	t.UpdatePositionFromMovement()
-	
+
 	direction := MovementDirection{X: dirX, Y: dirY}
 	t.Movement.StartMovement(direction, t.Position)
 	t.UpdatedAt = shared.NewTimestamp()
-	
+
 	return nil
 }
 
@@ -322,10 +322,10 @@ func (t *Trainer) StartMovement(dirX, dirY float64) error {
 func (t *Trainer) StopMovement() error {
 	// Update to final position
 	t.UpdatePositionFromMovement()
-	
+
 	t.Movement.StopMovement(t.Position)
 	t.UpdatedAt = shared.NewTimestamp()
-	
+
 	return nil
 }
 

@@ -153,3 +153,60 @@ func GetUserInfo(ctx context.Context) (userID, email, name string, ok bool) {
 	name, hasName := GetUserName(ctx)
 	return userID, email, name, hasUserID && hasEmail && hasName
 }
+
+// RequireSSEAuth returns a middleware specifically for SSE endpoints that supports multiple token sources
+func (m *AuthMiddleware) RequireSSEAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var tokenString string
+		
+		// Try to get token from multiple sources
+		// 1. Authorization header (fallback for other clients)
+		if authHeader := r.Header.Get("Authorization"); authHeader != "" {
+			parts := strings.SplitN(authHeader, " ", 2)
+			if len(parts) == 2 && parts[0] == "Bearer" {
+				tokenString = parts[1]
+			}
+		}
+		
+		// 2. URL query parameter (for EventSource compatibility)
+		if tokenString == "" {
+			tokenString = r.URL.Query().Get("token")
+		}
+		
+		// 3. Cookie (alternative for web clients)
+		if tokenString == "" {
+			if cookie, err := r.Cookie("auth_token"); err == nil {
+				tokenString = cookie.Value
+			}
+		}
+		
+		// No token found
+		if tokenString == "" {
+			m.logger.Debug("No authentication token found in SSE request")
+			http.Error(w, "Unauthorized: Authentication required", http.StatusUnauthorized)
+			return
+		}
+		
+		// Validate JWT token
+		claims, err := m.jwtService.ValidateToken(tokenString)
+		if err != nil {
+			m.logger.Debug("Invalid JWT token in SSE request", zap.Error(err))
+			http.Error(w, "Unauthorized: Invalid or expired token", http.StatusUnauthorized)
+			return
+		}
+		
+		// Add user info to request context
+		ctx := context.WithValue(r.Context(), UserIDContextKey, claims.UserID)
+		ctx = context.WithValue(ctx, UserEmailContextKey, claims.Email)
+		ctx = context.WithValue(ctx, UserNameContextKey, claims.Name)
+		
+		// Log successful authentication
+		m.logger.Debug("SSE JWT authentication successful", 
+			zap.String("userId", claims.UserID),
+			zap.String("email", claims.Email),
+			zap.String("name", claims.Name))
+		
+		// Continue to next handler with user context
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}

@@ -1,6 +1,9 @@
 package middleware
 
 import (
+	"bufio"
+	"fmt"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -162,9 +165,9 @@ func RateLimit(logger *logger.Logger) Middleware {
 
 			mu.Lock()
 			if _, exists := clients[ip]; !exists {
-				// Allow 100 requests per minute per IP
+				// Allow 600 requests per minute per IP (10 per second)
 				clients[ip] = &client{
-					limiter: rate.NewLimiter(rate.Every(time.Minute/100), 10),
+					limiter: rate.NewLimiter(rate.Every(time.Second/10), 50),
 				}
 			}
 			clients[ip].lastSeen = time.Now()
@@ -188,7 +191,7 @@ func RateLimit(logger *logger.Logger) Middleware {
 	}
 }
 
-// responseWriter wraps http.ResponseWriter to capture status code
+// responseWriter wraps http.ResponseWriter to capture status code while preserving interfaces
 type responseWriter struct {
 	http.ResponseWriter
 	statusCode int
@@ -197,6 +200,21 @@ type responseWriter struct {
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.statusCode = code
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+// Flush implements http.Flusher interface for SSE support
+func (rw *responseWriter) Flush() {
+	if flusher, ok := rw.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+// Hijack implements http.Hijacker interface if the underlying ResponseWriter supports it
+func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hijacker, ok := rw.ResponseWriter.(http.Hijacker); ok {
+		return hijacker.Hijack()
+	}
+	return nil, nil, fmt.Errorf("responseWriter does not implement http.Hijacker")
 }
 
 // getClientIP extracts the client IP from the request

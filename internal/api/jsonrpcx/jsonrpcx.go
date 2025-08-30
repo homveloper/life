@@ -23,6 +23,13 @@ type ResponseT[T any] struct {
 	ID      any           `json:"id,omitempty"`
 }
 
+// JsonRpcNotification represents a JSON-RPC 2.0 notification (no ID, no response expected)
+type JsonRpcNotification struct {
+	Jsonrpc string      `json:"jsonrpc"`
+	Method  string      `json:"method"`
+	Params  interface{} `json:"params,omitempty"`
+}
+
 // Request represents a JSON-RPC 2.0 request
 type Request struct {
 	JSONRPC string          `json:"jsonrpc" example:"2.0"`
