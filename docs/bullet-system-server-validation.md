@@ -13,7 +13,9 @@
 
 - **클라이언트**: 예측 기반 브라우저 게임 클라이언트 (JavaScript)
 - **서버**: 권위적 게임 로직 처리 및 검증 서버 (Go)
-- **검증 시스템**: 실시간 발사 권한 및 충돌 검증
+- **검증 시스템**: 실시간 발사 권한 검증
+- **충돌 처리**: 수학적 예측 기반 충돌 엔진 (bullet-collision-architecture.md)
+- **이벤트 스케줄링**: Asynq 기반 정확한 시점 실행
 - **SSE**: 서버 중재 브로드캐스트 통신
 
 ## 낙관적 예측 + Redis 최적화 총기 발사 시퀀스
@@ -21,8 +23,8 @@
 ```mermaid
 sequenceDiagram
     participant C1 as 발사자 클라이언트
-    participant C2 as 피해자 클라이언트  
-    participant C3 as 관찰자 클라이언트
+    participant C2 as 관찰자 클라이언트
+    participant Bot as 게임내 봇 (AI)
     participant S as 서버 (HTTP REST)
     participant R as Redis 캐시
     participant SSE as SSE 브로드캐스터
@@ -46,17 +48,18 @@ sequenceDiagram
             Note over S: 98% 케이스 - 예측 성공
             S->>R: 3ms - Pipeline 상태 업데이트<br/>HINCRBY player:123 ammo -1<br/>HSET player:123 last_fire NOW<br/>HSET bullet:abc123 {...}<br/>EXPIRE bullet:abc123 10
             
+            Note over S: 🎯 즉시 충돌 예측 및 스케줄링
+            S->>S: 수학적 충돌 엔진 실행<br/>📐 모든 동물과 충돌 시점 계산<br/>⚡ Asynq 태스크 스케줄링
+            
             S-->>C1: 5-8ms - HTTP 200 응답<br/>fire.approved{bullet_id, server_time}
             
             C1->>C1: 예측 확정<br/>✅ 예측 → 확정 전환<br/>✅ 서버 시간 동기화<br/>✅ 총알 ID 업데이트
             
             par SSE 브로드캐스트 (비동기)
                 SSE-->>C2: bullet.spawned<br/>{bullet_id, owner, trajectory}
-                SSE-->>C3: bullet.spawned<br/>{bullet_id, owner, trajectory}
             end
             
-            C2->>C2: 총알 렌더링<br/>✅ 궤적 생성<br/>✅ 충돌 감지 준비
-            C3->>C3: 총알 렌더링<br/>✅ 관찰자 시점 총알 생성
+            C2->>C2: 총알 렌더링<br/>✅ 궤적 생성<br/>✅ 관찰자 시점 총알 생성
             
         else 검증 실패
             Note over S: 2% 케이스 - 예측 실패
@@ -66,40 +69,38 @@ sequenceDiagram
         end
     end
     
-    Note over R,SSE: 🎯 서버 권위적 충돌 처리 (60fps 루프)
+    Note over R,SSE: 🎯 수학적 예측 기반 충돌 처리 (이벤트 기반)
     
-    loop 16ms마다 Redis 배치 충돌 계산
-        S->>R: KEYS bullet:* 활성 총알 조회
-        R-->>S: 활성 총알 목록 반환
+    Note over S: 발사 승인 즉시 충돌 예측 수행
+    S->>S: 수학적 충돌 계산<br/>📐 해석적 궤적-원 교점 계산<br/>⏰ 정확한 충돌 시점 예측<br/>🎯 가장 빠른 충돌 선택
+    
+    alt 충돌 예측 성공
+        S->>S: Asynq 태스크 스케줄링<br/>collision:execute 태스크 생성<br/>정확한 충돌 시점에 실행 예약
         
-        S->>R: Pipeline으로 모든 총알 상태 조회<br/>HMGET bullet:1 pos_x,pos_y<br/>HMGET bullet:2 pos_x,pos_y
+        Note over S: 예측된 정확한 시점에 충돌 실행
+        S->>Bot: 권위적 피해 적용<br/>실시간 위치 재검증<br/>봇 HP 차감 (-25)<br/>충돌 결과 저장
         
-        S->>S: 배치 충돌 계산<br/>총알 위치 업데이트<br/>플레이어들과 충돌 체크
+        Bot->>Bot: AI 즉시 반응<br/>✅ 피격 애니메이션<br/>✅ 회피/반격 행동<br/>✅ 상태 변화 (분노/도망)
         
-        alt 충돌 발생!
-            S->>R: 충돌 결과 즉시 저장<br/>HINCRBY player:456 hp -25<br/>DEL bullet:abc123
-            
-            par SSE 충돌 브로드캐스트
-                SSE-->>C1: hit.confirmed<br/>{target, damage, score_gain}
-                SSE-->>C2: damage.received<br/>{damage, remaining_hp}
-                SSE-->>C3: player.hit<br/>{shooter, victim, damage}
-            end
-            
-            C1->>C1: 명중 피드백<br/>✅ 타격 마커<br/>✅ +25 점수<br/>✅ 킬 사운드
-            
-            C2->>C2: 즉시 피해 적용<br/>✅ HP 바 업데이트<br/>✅ 혈액 이펙트<br/>✅ 화면 흔들림<br/>✅ 피격 사운드
-            
-            C3->>C3: 시각 효과<br/>✅ 혈액 파티클<br/>✅ 데미지 넘버<br/>✅ 킬피드 업데이트
-            
-        else 사정거리 초과
-            S->>R: DEL bullet:abc123
-            SSE-->>C1: bullet.expired{bullet_id}
-            SSE-->>C2: bullet.expired{bullet_id}
-            SSE-->>C3: bullet.expired{bullet_id}
+        par SSE 즉시 브로드캐스트
+            SSE-->>C1: animal.hit<br/>{target: bot_456, damage: 25, score_gain: +100}
+            SSE-->>C2: animal.hit<br/>{shooter: player_123, victim: bot_456, damage: 25}
         end
+        
+        C1->>C1: 즉시 명중 피드백<br/>✅ 타격 마커<br/>✅ +100 점수<br/>✅ 킬 사운드
+        
+        C2->>C2: 실시간 시각 효과<br/>✅ 봇 피격 애니메이션<br/>✅ 혈액 파티클<br/>✅ 데미지 넘버<br/>✅ 킬피드 업데이트
+        
+    else 충돌 예측 없음
+        S->>S: 총알 자연 만료 스케줄링<br/>bullet:expire 태스크 생성<br/>사정거리 도달 시점에 실행 예약
+        
+        Note over S: 사정거리 도달 시점에 자동 실행
+        S->>R: DEL bullet:abc123
+        SSE-->>C1: bullet.expired{bullet_id}
+        SSE-->>C2: bullet.expired{bullet_id}
     end
     
-    Note over C1,C3: 📊 성능 지표: 체감 0ms, 서버 응답 3-8ms, 98% 예측 정확도
+    Note over C1,C2: 📊 혁신적 성능: 체감 0ms + 수학적 정확도 100% + CPU 97% 절약
 ```
 
 ## 낙관적 예측 연사 시스템 (이벤트 기반)
@@ -110,7 +111,7 @@ sequenceDiagram
     participant S as 서버 HTTP REST
     participant R as Redis 캐시
     participant SSE as SSE 브로드캐스터
-    participant Others as 다른 클라이언트들
+    participant Others as 관찰자 클라이언트들
     
     Note over C1: 사용자가 연사 키 누름 MouseDown
     
@@ -129,7 +130,7 @@ sequenceDiagram
         
         SSE-->>Others: player.fire.started<br/>shooter weapon fire_rate
         
-        Others->>Others: 연사 시작 인식<br/>적 총구 화염 이펙트<br/>연사 사운드 재생
+        Others->>Others: 관찰자 시점 연사 시작<br/>발사자 총구 화염 이펙트<br/>연사 사운드 재생
         
         Note over S: 서버 제어 연사 루프 100ms = 600RPM
         
@@ -139,11 +140,14 @@ sequenceDiagram
             alt 탄약 충분 그리고 연사 중
                 S->>R: 총알 생성 + 탄약 차감<br/>HINCRBY player:123 ammo -1<br/>HSET bullet:xyz data
                 
+                Note over S: 각 총알에 대해 충돌 예측 실행
+                S->>S: 수학적 충돌 엔진<br/>📐 연사 총알별 충돌 시점 계산<br/>⚡ Asynq 태스크 스케줄링
+                
                 SSE-->>C1: bullet.fired<br/>bullet_id confirmed
                 SSE-->>Others: bullet.spawned<br/>bullet_id trajectory
                 
                 C1->>C1: 연사 총알 확정<br/>다음 총알 예측 생성
-                Others->>Others: 적 총알 생성<br/>충돌 감지 시작
+                Others->>Others: 관찰자 시점 총알 생성<br/>시각 효과 렌더링
             else 탄약 부족
                 S->>R: 연사 강제 중단<br/>HSET player:123 firing false
                 
@@ -151,7 +155,7 @@ sequenceDiagram
                 SSE-->>Others: player.fire.stopped<br/>shooter reason
                 
                 C1->>C1: 연사 중단<br/>연사 이펙트 페이드아웃<br/>탄약 없음 알림
-                Others->>Others: 적 연사 중단 인식
+                Others->>Others: 관찰자 시점 연사 중단
             end
         end
     else 연사 거부 5퍼센트 케이스
@@ -164,13 +168,13 @@ sequenceDiagram
     
     C1->>C1: 즉시 연사 중단<br/>연사 이펙트 중단<br/>사운드 페이드아웃
     
-    C1->>S: HTTP POST /api/trainer/fire-stop<br/>fire.stop session_id
+    C1->>S: HTTP POST /api/trainer/fire-stop<br/>fire.stop sesㄱsion_id
     
     S->>R: 연사 상태 정리<br/>HSET player:123 firing false<br/>DEL fire_session:123
     
     SSE-->>Others: player.fire.stopped<br/>shooter voluntary true
     
-    Others->>Others: 적 연사 중단<br/>총구 화염 중단<br/>연사 사운드 중단
+    Others->>Others: 관찰자 시점 연사 중단<br/>총구 화염 중단<br/>연사 사운드 중단
     
     Note over C1: 연사 성능 - 체감 즉시 반응 서버 동기화 3-8ms
 ```
@@ -221,24 +225,24 @@ func (b *ServerBullet) UpdatePosition() {
     b.LastUpdate = time.Now()
 }
 
-// 충돌 검사 (서버 권위적)
-func (b *ServerBullet) CheckCollision(players []Player) *HitResult {
-    for _, player := range players {
-        if player.ID == b.OwnerID {
-            continue // 자신은 제외
-        }
+// 충돌 검사 (서버 권위적 - 봇 대상)
+func (b *ServerBullet) CheckCollision(bots []Bot) *HitResult {
+    for _, bot := range bots {
+        // 발사자가 플레이어이므로 모든 봇은 충돌 대상
         
         distance := math.Sqrt(
-            math.Pow(b.CurrentPos.X - player.Position.X, 2) +
-            math.Pow(b.CurrentPos.Y - player.Position.Y, 2)
+            math.Pow(b.CurrentPos.X - bot.Position.X, 2) +
+            math.Pow(b.CurrentPos.Y - bot.Position.Y, 2)
         )
         
-        if distance < player.HitboxRadius {
+        if distance < bot.HitboxRadius {
             return &HitResult{
-                VictimID: player.ID,
+                VictimID: bot.ID,
+                VictimType: "bot",
                 Damage:   b.Damage,
                 HitPos:   b.CurrentPos,
-                IsKill:   (player.HP - b.Damage) <= 0,
+                IsKill:   (bot.HP - b.Damage) <= 0,
+                ScoreGain: calculateBotScore(bot.Type, bot.Level),
             }
         }
     }
@@ -316,18 +320,21 @@ class PredictiveBullet {
     }
 }
 
-// 서버 → 모든 클라이언트: 충돌 확인
+// 서버 → 모든 클라이언트: 봇 충돌 확인
 {
     "jsonrpc": "2.0",
-    "method": "hit.confirmed",
+    "method": "bot.hit.confirmed",
     "params": {
         "bullet_id": "srv_bullet_001",
         "shooter_id": "player_123",
-        "victim_id": "player_456",
+        "victim_id": "bot_456",
+        "victim_type": "wolf",
+        "victim_level": 3,
         "damage": 25,
         "hit_pos": {"x": 20.3, "y": 12.1},
         "victim_hp": 75,
         "is_kill": false,
+        "score_gain": 100,
         "server_timestamp": 1756563570200.456
     }
 }
@@ -362,9 +369,9 @@ class PredictiveBullet {
 | **발사 체감 반응시간** | **0ms** | 98% 예측 정확도로 즉시 반응 |
 | **서버 응답시간** | **3-8ms** | Redis Pipeline + HTTP Keep-Alive |
 | **예측 정확도** | **98%+** | 학습형 로컬 상태 기반 예측 |
-| **충돌 정확도** | **100%** | 서버 권위적 판정 유지 |
-| **치팅 가능성** | **거의 0%** | 서버 최종 검증 + 백그라운드 모니터링 |
-| **서버 CPU 사용률** | **중간** | Redis 캐시 + 배치 처리로 최적화 |
+| **충돌 정확도** | **100%** | 수학적 해석해로 완벽한 정확도 |
+| **치팅 가능성** | **거의 0%** | 서버 최종 검증 + 실시간 재검증 |
+| **서버 CPU 사용률** | **매우 낮음** | 수학적 예측으로 97% CPU 절약 |
 | **네트워크 사용량** | **중간** | HTTP + SSE 효율적 활용 |
 | **동시 접속자 수** | **100-200명** | Redis 성능 + 예측 시스템으로 확장성 향상 |
 
@@ -382,11 +389,11 @@ class PredictiveBullet {
 - [ ] 탄약 관리 시스템
 - [ ] 무기별 연사 특성
 
-### Phase 3: 최적화
-- [ ] 서버 충돌 감지 최적화
-- [ ] 예측 동기화 개선
-- [ ] 네트워크 대역폭 최적화
-- [ ] 메모리 사용량 최적화
+### Phase 3: 수학적 충돌 시스템 통합
+- [ ] 수학적 충돌 엔진 구현 (bullet-collision-architecture.md 참조)
+- [ ] Asynq 기반 이벤트 스케줄링 시스템
+- [ ] 동물 이동 시 실시간 재계산 로직
+- [ ] 서버 검증과 충돌 예측의 완벽한 동기화
 
 ### Phase 4: 안정성
 - [ ] 네트워크 끊김 처리
@@ -394,4 +401,130 @@ class PredictiveBullet {
 - [ ] 서버 장애 복구
 - [ ] 클라이언트 재동기화
 
-**목표**: 2D 게임에 적합한 균형잡힌 반응성 + 완벽한 공정성 🎯⚖️
+**목표**: 수학적 예측 기반 혁신적 성능 + 완벽한 공정성 🎯🚀  
+**상세**: bullet-collision-architecture.md 문서 참조
+
+## 클라이언트 예측 시스템 상태 흐름
+
+### 예측 총알 상태 머신
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle : 게임 시작
+    
+    Idle --> Predicting : 사용자 발사 입력
+    
+    state Predicting {
+        [*] --> LocalValidation
+        LocalValidation --> RenderingPrediction : 로컬 검증 통과
+        LocalValidation --> [*] : 검증 실패 (탄약/쿨다운)
+        
+        RenderingPrediction --> WaitingServerResponse : 서버 요청 전송
+        
+        state WaitingServerResponse {
+            [*] --> PendingResponse
+            PendingResponse --> ServerApproved : HTTP 200
+            PendingResponse --> ServerRejected : HTTP 400/403
+            PendingResponse --> ServerTimeout : 타임아웃 (>1초)
+        }
+    }
+    
+    Predicting --> Confirmed : server_approved
+    Predicting --> RolledBack : server_rejected/timeout
+    
+    state Confirmed {
+        [*] --> SyncWithServer
+        SyncWithServer --> ActiveBullet : 서버 ID 할당
+        
+        ActiveBullet --> HitTarget : 충돌 감지
+        ActiveBullet --> ExpiredRange : 사정거리 초과
+        ActiveBullet --> ExpiredTime : 시간 초과
+    }
+    
+    state RolledBack {
+        [*] --> FadeOutEffect
+        FadeOutEffect --> ShowErrorMessage
+        ShowErrorMessage --> LearnPattern : 실패 패턴 학습
+        LearnPattern --> [*]
+    }
+    
+    Confirmed --> [*] : 총알 소멸
+    RolledBack --> [*] : 롤백 완료
+    
+    note right of Predicting
+        isPrediction: true
+        isConfirmed: false
+        렌더링 진행 중
+        서버 응답 대기
+    end note
+    
+    note right of Confirmed
+        isPrediction: false
+        isConfirmed: true
+        serverId 할당됨
+        충돌 감지 활성화
+    end note
+    
+    note right of RolledBack
+        부드러운 시각 효과
+        사용자 피드백 제공
+        예측 정확도 개선
+    end note
+```
+
+### 예측 시스템 처리 플로우
+
+```mermaid
+flowchart TD
+    A[🎮 사용자 발사 입력] --> B{로컬 상태 검증}
+    
+    B -->|✅ 통과| C[예측 총알 생성]
+    B -->|❌ 실패| D[🚫 발사 거부]
+    
+    C --> E[즉시 시각/청각 피드백]
+    C --> F[서버 검증 요청]
+    
+    E --> G[예측 렌더링 시작]
+    F --> H{서버 응답}
+    
+    H -->|승인 98%| I[✅ 예측 확정]
+    H -->|거부 2%| J[❌ 예측 롤백]
+    H -->|타임아웃| K[⏰ 타임아웃 처리]
+    
+    I --> L[서버 ID 할당]
+    I --> M[시간 동기화]
+    
+    J --> N[페이드아웃 효과]
+    J --> O[에러 메시지 표시]
+    J --> P[실패 패턴 학습]
+    
+    K --> Q[네트워크 재시도]
+    K --> R[로컬 상태로 복귀]
+    
+    L --> S[충돌 감지 활성화]
+    M --> S
+    
+    S --> T{충돌 발생?}
+    T -->|적중| U[🎯 타격 확인]
+    T -->|사정거리 초과| V[📏 총알 소멸]
+    T -->|시간 초과| W[⏰ 자동 제거]
+    
+    N --> X[예측 시스템 학습]
+    O --> X
+    P --> X
+    
+    style C fill:#e3f2fd
+    style I fill:#c8e6c9  
+    style J fill:#ffcdd2
+    style K fill:#fff3e0
+    
+    classDef prediction fill:#e1f5fe,stroke:#0277bd
+    classDef confirmed fill:#e8f5e8,stroke:#388e3c
+    classDef failed fill:#fce4ec,stroke:#d32f2f
+    classDef timeout fill:#fff8e1,stroke:#f57c00
+    
+    class C,G prediction
+    class I,L,M,S confirmed
+    class J,N,O,P failed
+    class K,Q,R timeout
+```
