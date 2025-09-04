@@ -16,7 +16,8 @@ let trainerState = {
         start_time: null,
         start_pos: { x: 15.0, y: 10.0 },
         is_moving: false
-    }
+    },
+    color: '#ff4444' // Will be updated from server
 };
 
 // Position sync interval
@@ -25,7 +26,16 @@ let interpolationAnimationId = null;
 
 // SSE connection for real-time updates
 let eventSource = null;
-let otherTrainers = new Map(); // Track other trainers: userId -> {position, movement, nickname}
+let otherTrainers = new Map(); // Track other trainers: userId -> {position, movement, nickname, lastSeen}
+let trainerCleanupInterval = null;
+
+// Trainer colors for visual distinction
+const trainerColors = [
+    '#4444ff', '#ff4444', '#44ff44', '#ffaa44', 
+    '#ff44aa', '#44aaff', '#aaff44', '#aa44ff',
+    '#ffaa88', '#88aaff', '#aaffaa', '#ffaabb'
+];
+let trainerColorMap = new Map(); // userId -> color
 
 // Current movement state tracking
 let currentDirection = { x: 0, y: 0 };
@@ -33,6 +43,7 @@ let isCurrentlyMoving = false;
 
 // Movement update debouncing
 let movementUpdateTimeout = null;
+let serverNextAllowedAt = 0; // Server-provided timestamp when next request is allowed
 const MOVEMENT_UPDATE_DELAY = 100; // 100ms debounce for smoother diagonal movement and reduced server load
 
 // Pressed keys tracking
@@ -56,7 +67,7 @@ function buildApiUrl(endpoint) {
 // Fetch server info dynamically
 async function fetchServerInfo() {
     try {
-        const response = await fetch('/api/v1/server.Info', {
+        const response = await fetch(buildApiUrl('/api/v1/server.Info'), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -89,11 +100,14 @@ async function fetchServerInfo() {
 
 // Authentication
 async function guestLogin() {
-    const nickname = document.getElementById('nickname').value.trim();
+    let nickname = document.getElementById('nickname').value.trim();
     
+    // Generate unique nickname if empty or invalid
     if (!nickname || nickname.length < 3 || nickname.length > 20) {
-        showMessage('Please enter a nickname (3-20 characters)', 'error');
-        return;
+        const timestamp = Date.now().toString().slice(-4);
+        const randomNum = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+        nickname = `Guest${timestamp}${randomNum}`;
+        document.getElementById('nickname').value = nickname;
     }
     
     // Fetch server info first
@@ -103,12 +117,8 @@ async function guestLogin() {
         return;
     }
     
-    // Generate a device ID (or use stored one)
-    let deviceId = localStorage.getItem('life-game-device-id');
-    if (!deviceId) {
-        deviceId = 'device-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
-        localStorage.setItem('life-game-device-id', deviceId);
-    }
+    // Generate a unique device ID for each tab/session
+    const deviceId = 'device-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9) + '-' + Math.floor(Math.random() * 10000);
     
     const loginBtn = document.getElementById('login-btn');
     loginBtn.disabled = true;
@@ -161,6 +171,12 @@ async function guestLogin() {
         // Start position sync and SSE connection
         startPositionSync();
         connectSSE();
+        
+        // Fetch other trainers in the area
+        fetchOtherTrainers();
+        
+        // Start trainer cleanup interval
+        startTrainerCleanup();
         
         showMessage(`Welcome ${nickname}! You are logged in as guest.`, 'success');
         
@@ -273,6 +289,12 @@ async function move(dirX, dirY) {
         
         // Apply JSON merge patch
         applyChanges(result.result.changes);
+        
+        // Update server debouncing timestamp
+        if (result.result.next_request_allowed_at) {
+            serverNextAllowedAt = result.result.next_request_allowed_at;
+        }
+        
         showMessage(`Started moving ${dirX},${dirY}`, 'success');
         
     } catch (error) {
@@ -334,6 +356,12 @@ async function stopMovement() {
         
         // Apply JSON merge patch
         applyChanges(result.result.changes);
+        
+        // Update server debouncing timestamp
+        if (result.result.next_request_allowed_at) {
+            serverNextAllowedAt = result.result.next_request_allowed_at;
+        }
+        
         showMessage('Movement stopped', 'success');
         
     } catch (error) {
@@ -545,9 +573,14 @@ function fallbackApplyChanges(changes) {
         }
     }
     
+    // Apply color changes
+    if (changes.color) {
+        trainerState.color = changes.color;
+    }
+    
     // Apply other changes
     Object.keys(changes).forEach(key => {
-        if (key !== 'position' && key !== 'movement') {
+        if (key !== 'position' && key !== 'movement' && key !== 'color') {
             trainerState[key] = changes[key];
         }
     });
@@ -582,11 +615,33 @@ function updateUI() {
     mapContainer.style.backgroundPosition = `${worldOffsetX + centerX}px ${worldOffsetY + centerY}px`;
     
     
-    // Update movement visual state
-    if (trainerState.movement.is_moving) {
-        trainer.classList.add('moving');
+    // Update trainer color from server data
+    if (trainerState.color) {
+        trainer.style.backgroundColor = trainerState.color;
+        
+        // Update moving state with color variations
+        if (trainerState.movement.is_moving) {
+            trainer.classList.add('moving');
+            // Slightly brighter when moving
+            const rgb = trainerState.color.match(/\w\w/g);
+            if (rgb) {
+                const [r, g, b] = rgb.map(x => Math.min(255, parseInt(x, 16) + 30));
+                const brighterColor = `rgb(${r}, ${g}, ${b})`;
+                trainer.style.backgroundColor = brighterColor;
+                trainer.style.boxShadow = `0 0 8px ${trainerState.color}`;
+            }
+        } else {
+            trainer.classList.remove('moving');
+            trainer.style.backgroundColor = trainerState.color;
+            trainer.style.boxShadow = '';
+        }
     } else {
-        trainer.classList.remove('moving');
+        // Update movement visual state (fallback)
+        if (trainerState.movement.is_moving) {
+            trainer.classList.add('moving');
+        } else {
+            trainer.classList.remove('moving');
+        }
     }
     
     // Update status display with NaN protection
@@ -721,7 +776,15 @@ function scheduleMovementUpdate() {
         clearTimeout(movementUpdateTimeout);
     }
     
-    // Schedule new update with debounce
+    // Calculate delay based on server debouncing timestamp
+    const now = Date.now();
+    const serverDelay = Math.max(0, serverNextAllowedAt - now);
+    const clientDelay = MOVEMENT_UPDATE_DELAY;
+    
+    // Use the maximum of server delay and client delay for better UX
+    const actualDelay = Math.max(serverDelay, clientDelay);
+    
+    // Schedule new update with calculated debounce
     movementUpdateTimeout = setTimeout(() => {
         const newDirection = calculateMovementDirection();
         
@@ -735,7 +798,7 @@ function scheduleMovementUpdate() {
         }
         
         movementUpdateTimeout = null;
-    }, MOVEMENT_UPDATE_DELAY);
+    }, actualDelay);
 }
 
 // Handle key press events
@@ -823,6 +886,8 @@ window.addEventListener('load', async () => {
         fetchInitialTrainerData().then(() => {
             startPositionSync();
             connectSSE(); // Connect to real-time updates
+            fetchOtherTrainers(); // Fetch other trainers in the area
+            startTrainerCleanup(); // Start trainer cleanup interval
             showMessage(`Welcome back ${storedNickname}!`, 'success');
         }).catch(error => {
             console.error('Failed to fetch trainer data:', error);
@@ -845,9 +910,11 @@ function logout() {
     // Stop position sync and SSE connection
     stopPositionSync();
     disconnectSSE();
+    stopTrainerCleanup();
     
     // Clear other trainers data
     otherTrainers.clear();
+    trainerColorMap.clear();
     
     // Reset direction tracking
     currentDirection = { x: 0, y: 0 };
@@ -877,7 +944,8 @@ function resetTrainerState() {
             start_time: null,
             start_pos: { x: 15.0, y: 10.0 },
             is_moving: false
-        }
+        },
+        color: '#ff4444' // Will be updated from server
     };
 }
 
@@ -913,6 +981,11 @@ async function fetchInitialTrainerData() {
         // Update trainer state with server data
         const trainer = result.result;
         console.log('Raw trainer data from server:', trainer);
+        
+        // Set color from server
+        if (trainer.color) {
+            trainerState.color = trainer.color;
+        }
         
         // Validate and set position
         if (trainer.position && 
@@ -1097,6 +1170,9 @@ function handleTrainerPositionUpdate(params, isOwnUpdate) {
             let otherTrainer = otherTrainers.get(trainerId) || {};
             if (params.position) otherTrainer.position = params.position;
             if (params.movement) otherTrainer.movement = params.movement;
+            if (params.nickname) otherTrainer.nickname = params.nickname;
+            if (params.color) otherTrainer.color = params.color; // Use server-provided color
+            otherTrainer.lastSeen = Date.now(); // Update last seen timestamp
             otherTrainers.set(trainerId, otherTrainer);
             
             // Update other trainers display
@@ -1122,6 +1198,9 @@ function handleTrainerMovementStopped(params, isOwnUpdate) {
             let otherTrainer = otherTrainers.get(trainerId) || {};
             if (params.position) otherTrainer.position = params.position;
             if (params.movement) otherTrainer.movement = params.movement;
+            if (params.nickname) otherTrainer.nickname = params.nickname;
+            if (params.color) otherTrainer.color = params.color; // Use server-provided color
+            otherTrainer.lastSeen = Date.now(); // Update last seen timestamp
             otherTrainers.set(trainerId, otherTrainer);
             
             updateOtherTrainersDisplay();
@@ -1140,7 +1219,9 @@ function handleTrainerCreated(params) {
         position: params.position || { x: 15.0, y: 10.0 },
         movement: { is_moving: false, direction: { x: 0, y: 0 } },
         nickname: params.nickname || 'Unknown',
-        level: params.level || 1
+        color: params.color || '#4444ff', // Use server-provided color or fallback
+        level: params.level || 1,
+        lastSeen: Date.now()
     });
     
     updateOtherTrainersDisplay();
@@ -1150,6 +1231,9 @@ function handleTrainerCreated(params) {
 function updateOtherTrainersDisplay() {
     // Remove existing other trainer elements
     document.querySelectorAll('.other-trainer').forEach(el => el.remove());
+    
+    // Update trainer count and list
+    updateTrainersList();
     
     // Add other trainers to the map
     const mapContainer = document.querySelector('.map-container');
@@ -1172,12 +1256,23 @@ function updateOtherTrainersDisplay() {
             const screenX = centerX + (relativeX * 20); // Scale factor for visual movement
             const screenY = centerY + (relativeY * 20);
             
+            // Use server-provided color or fallback to client-side color assignment
+            let trainerColor = trainer.color;
+            if (!trainerColor) {
+                // Fallback: use client-side color assignment if server doesn't provide color
+                if (!trainerColorMap.has(userId)) {
+                    const colorIndex = trainerColorMap.size % trainerColors.length;
+                    trainerColorMap.set(userId, trainerColors[colorIndex]);
+                }
+                trainerColor = trainerColorMap.get(userId);
+            }
+            
             trainerElement.style.position = 'absolute';
             trainerElement.style.left = screenX + 'px';
             trainerElement.style.top = screenY + 'px';
             trainerElement.style.width = '18px';
             trainerElement.style.height = '18px';
-            trainerElement.style.background = '#4444ff'; // Blue for other trainers
+            trainerElement.style.background = trainerColor;
             trainerElement.style.border = '2px solid #fff';
             trainerElement.style.borderRadius = '50%';
             trainerElement.style.transform = 'translate(-50%, -50%)';
@@ -1185,8 +1280,12 @@ function updateOtherTrainersDisplay() {
             trainerElement.style.transition = 'all 0.3s ease';
             
             if (trainer.movement && trainer.movement.is_moving) {
-                trainerElement.style.background = '#6666ff';
-                trainerElement.style.boxShadow = '0 0 8px rgba(68, 68, 255, 0.5)';
+                // Slightly brighter when moving
+                const rgb = trainerColor.match(/\w\w/g);
+                const [r, g, b] = rgb.map(x => Math.min(255, parseInt(x, 16) + 30));
+                const brighterColor = `rgb(${r}, ${g}, ${b})`;
+                trainerElement.style.background = brighterColor;
+                trainerElement.style.boxShadow = `0 0 8px ${trainerColor}`;
             }
             
             mapContainer.appendChild(trainerElement);
@@ -1194,7 +1293,149 @@ function updateOtherTrainersDisplay() {
     });
 }
 
+// Update the trainers list in the sidebar
+function updateTrainersList() {
+    const trainerCountElement = document.getElementById('trainer-count');
+    const trainerListElement = document.getElementById('trainer-list');
+    const noTrainersElement = document.getElementById('no-trainers');
+    
+    const trainerCount = otherTrainers.size;
+    trainerCountElement.textContent = trainerCount;
+    
+    if (trainerCount === 0) {
+        trainerListElement.innerHTML = '<div class="text-gray-500 italic" id="no-trainers">No other trainers online</div>';
+        return;
+    }
+    
+    // Clear the list
+    trainerListElement.innerHTML = '';
+    
+    // Add each trainer to the list
+    otherTrainers.forEach((trainer, userId) => {
+        const trainerItem = document.createElement('div');
+        trainerItem.className = 'flex justify-between items-center p-1 bg-white rounded border text-xs';
+        
+        const nickname = trainer.nickname || `User-${userId.slice(-4)}`;
+        const level = trainer.level || 1;
+        const isMoving = trainer.movement && trainer.movement.is_moving;
+        const distance = trainer.position ? 
+            Math.round(Math.sqrt(
+                Math.pow(trainer.position.x - trainerState.position.x, 2) + 
+                Math.pow(trainer.position.y - trainerState.position.y, 2)
+            ) * 10) / 10 : '?';
+        
+        trainerItem.innerHTML = `
+            <div>
+                <span class="font-semibold text-blue-800">${nickname}</span>
+                <span class="text-gray-600">Lv.${level}</span>
+            </div>
+            <div class="text-right">
+                <div class="text-gray-500">${distance}u away</div>
+                <div class="${isMoving ? 'text-green-600 font-bold' : 'text-gray-400'}">
+                    ${isMoving ? '🏃 Moving' : '⏸️ Still'}
+                </div>
+            </div>
+        `;
+        
+        trainerListElement.appendChild(trainerItem);
+    });
+}
+
 // Get current user ID from stored data
 function getCurrentUserId() {
     return localStorage.getItem('life-game-user-id') || '';
+}
+
+// Fetch other trainers in the area for initial sync
+async function fetchOtherTrainers() {
+    if (!authToken) {
+        console.warn('No auth token available for fetching other trainers');
+        return;
+    }
+    
+    try {
+        const response = await fetch(buildApiUrl('/api/v1/trainer.List'), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify({
+                jsonrpc: '2.0',
+                method: 'trainer.List',
+                params: {},
+                id: Date.now()
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.error) {
+            console.warn('Failed to fetch other trainers:', result.error);
+            return;
+        }
+        
+        // Process trainer list and add to otherTrainers map
+        if (result.result && result.result.trainers) {
+            const currentUserId = getCurrentUserId();
+            result.result.trainers.forEach(trainer => {
+                if (trainer.id !== currentUserId) {
+                    otherTrainers.set(trainer.id, {
+                        position: trainer.position || { x: 15.0, y: 10.0 },
+                        movement: { is_moving: false, direction: { x: 0, y: 0 } },
+                        nickname: trainer.nickname || 'Unknown',
+                        color: trainer.color || '#4444ff', // Use server-provided color
+                        level: trainer.level || 1,
+                        lastSeen: Date.now()
+                    });
+                }
+            });
+            
+            // Update display with fetched trainers
+            updateOtherTrainersDisplay();
+            console.log(`Loaded ${otherTrainers.size} other trainers`);
+        }
+        
+    } catch (error) {
+        console.warn('Network error fetching other trainers:', error);
+    }
+}
+
+// Start periodic cleanup of inactive trainers
+function startTrainerCleanup() {
+    if (trainerCleanupInterval) {
+        clearInterval(trainerCleanupInterval);
+    }
+    
+    // Clean up inactive trainers every 30 seconds
+    trainerCleanupInterval = setInterval(cleanupInactiveTrainers, 30000);
+}
+
+// Stop trainer cleanup interval
+function stopTrainerCleanup() {
+    if (trainerCleanupInterval) {
+        clearInterval(trainerCleanupInterval);
+        trainerCleanupInterval = null;
+    }
+}
+
+// Clean up trainers that haven't been seen for more than 2 minutes
+function cleanupInactiveTrainers() {
+    const now = Date.now();
+    const inactiveThreshold = 2 * 60 * 1000; // 2 minutes
+    let removedCount = 0;
+    
+    otherTrainers.forEach((trainer, userId) => {
+        if (trainer.lastSeen && now - trainer.lastSeen > inactiveThreshold) {
+            otherTrainers.delete(userId);
+            trainerColorMap.delete(userId); // Also remove color mapping
+            removedCount++;
+            console.log(`Removed inactive trainer: ${trainer.nickname || userId}`);
+        }
+    });
+    
+    if (removedCount > 0) {
+        updateOtherTrainersDisplay();
+        showMessage(`${removedCount} inactive trainer(s) removed`, 'info');
+    }
 }
