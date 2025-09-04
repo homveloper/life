@@ -19,11 +19,20 @@ import (
 	"github.com/danghamo/life/pkg/logger"
 )
 
+// MovementBroadcaster interface for broadcasting moving trainer positions
+type MovementBroadcaster interface {
+	AddMovingTrainer(userID, displayName, color string) // displayName can be userID or nickname
+	RemoveMovingTrainer(userID string)
+	UpdateTrainerActivity(userID string)
+	GetCurrentOnlineTrainers(ctx context.Context) []cqrscommands.TrainerMovedEvent
+}
+
 // TrainerHandler handles trainer-related HTTP requests with JSON-RPC 2.0 format
 type TrainerHandler struct {
-	logger     *logger.Logger
-	repository trainer.Repository
-	eventBus   *cqrs.EventBus
+	logger              *logger.Logger
+	repository          trainer.Repository
+	eventBus            *cqrs.EventBus
+	movementBroadcaster MovementBroadcaster
 }
 
 // getOrCreateTrainer gets an existing trainer or creates a default one for the user
@@ -41,10 +50,10 @@ func (h *TrainerHandler) getOrCreateTrainer(ctx context.Context, userID string, 
 	}
 
 	// Create new trainer with default nickname
-	nickname, err := trainer.NewNickname(defaultNickname)
-	if err != nil {
+	nickname := defaultNickname
+	if err := trainer.ValidateNickname(nickname); err != nil {
 		// If default nickname fails, use a fallback
-		nickname, _ = trainer.NewNickname("Player" + userID[:8])
+		nickname = "Player" + userID[:8]
 	}
 
 	var newTrainer *trainer.Trainer
@@ -63,17 +72,18 @@ func (h *TrainerHandler) getOrCreateTrainer(ctx context.Context, userID string, 
 
 	h.logger.Info("Auto-created trainer for new user",
 		zap.String("userId", userID),
-		zap.String("nickname", nickname.Value()))
+		zap.String("nickname", nickname))
 
 	return newTrainer, nil
 }
 
 // NewTrainerHandler creates a new trainer handler
-func NewTrainerHandler(logger *logger.Logger, repository trainer.Repository, eventBus *cqrs.EventBus) *TrainerHandler {
+func NewTrainerHandler(logger *logger.Logger, repository trainer.Repository, eventBus *cqrs.EventBus, movementBroadcaster MovementBroadcaster) *TrainerHandler {
 	return &TrainerHandler{
-		logger:     logger.WithComponent("trainer-handler"),
-		repository: repository,
-		eventBus:   eventBus,
+		logger:              logger.WithComponent("trainer-handler"),
+		repository:          repository,
+		eventBus:            eventBus,
+		movementBroadcaster: movementBroadcaster,
 	}
 }
 
@@ -93,7 +103,7 @@ type MoveTrainerRequest struct {
 }
 
 type ListTrainerRequest struct {
-	// No params needed for list
+	OnlineOnly bool `json:"online_only,omitempty"` // Filter to show only currently online trainers
 }
 
 type FetchPositionRequest struct {
@@ -109,7 +119,8 @@ type FetchPositionResponse struct {
 type CreateTrainerResponse = trainer.Trainer
 type GetTrainerResponse = trainer.Trainer
 type MoveTrainerResponse struct {
-	Changes map[string]interface{} `json:"changes"`
+	Changes              map[string]interface{} `json:"changes"`
+	NextRequestAllowedAt int64                  `json:"next_request_allowed_at"` // Unix timestamp in milliseconds
 }
 type StatusTrainerResponse = trainer.Trainer
 
@@ -121,6 +132,7 @@ type ListTrainerResponse struct {
 type TrainerSummary struct {
 	ID       string         `json:"id"`
 	Nickname string         `json:"nickname"`
+	Color    string         `json:"color"`
 	Level    int            `json:"level"`
 	Position map[string]int `json:"position"`
 }
@@ -164,8 +176,8 @@ func (h *TrainerHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create trainer domain entity
-	nickname, err := trainer.NewNickname(params.Nickname)
-	if err != nil {
+	nickname := params.Nickname
+	if err := trainer.ValidateNickname(nickname); err != nil {
 		jsonrpcx.WithError(r, req.ID, jsonrpcx.InvalidParams, err.Error())
 		return
 	}
@@ -192,7 +204,7 @@ func (h *TrainerHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 
 	h.logger.Info("Trainer created successfully",
 		zap.String("userId", userID),
-		zap.String("nickname", createdTrainer.Nickname.Value()))
+		zap.String("nickname", createdTrainer.Nickname))
 
 	jsonrpcx.Success(w, req.ID, result)
 }
@@ -304,6 +316,7 @@ func (h *TrainerHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 		jsonrpcx.WithError(r, req.ID, jsonrpcx.InternalError, "Failed to get original trainer state")
 		return
 	}
+	
 
 	// Handle movement command
 	var updatedTrainer *trainer.Trainer
@@ -339,11 +352,18 @@ func (h *TrainerHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create JSON merge patch with only changed fields
-	changes, err := h.createTrainerChanges(originalTrainer, updatedTrainer)
-	if err != nil {
-		jsonrpcx.WithError(r, req.ID, jsonrpcx.InternalError, fmt.Sprintf("Failed to create changes patch: %v", err))
-		return
+	// Create JSON merge patch with only changed fields  
+	var changes map[string]interface{}
+	if originalTrainer != nil {
+		changes, err = h.createTrainerChanges(originalTrainer, updatedTrainer)
+		if err != nil {
+			h.logger.Warn("Failed to create changes patch", zap.Error(err))
+			// Continue with empty changes rather than failing the request
+			changes = make(map[string]interface{})
+		}
+	} else {
+		// No original trainer to compare with, return empty changes
+		changes = make(map[string]interface{})
 	}
 
 	// Publish domain event for SSE broadcasting
@@ -351,8 +371,13 @@ func (h *TrainerHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 	var event interface{}
 
 	if params.Action == "start" {
+		// Add to movement broadcaster for periodic position updates
+		h.movementBroadcaster.AddMovingTrainer(userID, userID, updatedTrainer.Color)
+		
 		event = &cqrscommands.TrainerMovedEvent{
 			UserID:    userID,
+			Nickname:  updatedTrainer.Nickname,
+			Color:     updatedTrainer.Color,
 			Position:  updatedTrainer.Position,
 			Movement:  updatedTrainer.Movement,
 			Timestamp: time.Now(),
@@ -360,8 +385,13 @@ func (h *TrainerHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 			Changes:   changes,
 		}
 	} else {
+		// Remove from movement broadcaster when stopped
+		h.movementBroadcaster.RemoveMovingTrainer(userID)
+		
 		event = &cqrscommands.TrainerStoppedEvent{
 			UserID:    userID,
+			Nickname:  updatedTrainer.Nickname,
+			Color:     updatedTrainer.Color,
 			Position:  updatedTrainer.Position,
 			Movement:  updatedTrainer.Movement,
 			Timestamp: time.Now(),
@@ -379,7 +409,14 @@ func (h *TrainerHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 		// Don't fail the request if event publishing fails
 	}
 
-	result := MoveTrainerResponse{Changes: changes}
+	// Calculate next request allowed timestamp (100ms debounce)
+	const debounceMillis = 100
+	nextAllowedAt := time.Now().Add(debounceMillis * time.Millisecond).UnixMilli()
+
+	result := MoveTrainerResponse{
+		Changes:              changes,
+		NextRequestAllowedAt: nextAllowedAt,
+	}
 
 	h.logger.Info("Trainer movement command",
 		zap.String("userId", userID),
@@ -418,24 +455,73 @@ func (h *TrainerHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: Implement actual trainer listing using query handler
-	// For now, return a mock response
-	result := map[string]any{
-		"trainers": []map[string]any{
-			{
-				"id":       "trainer_1",
-				"nickname": "Player1",
-				"level":    3,
-				"position": map[string]int{"x": 10, "y": 5},
-			},
-			{
-				"id":       "trainer_2",
-				"nickname": "Player2",
-				"level":    7,
-				"position": map[string]int{"x": 20, "y": 15},
-			},
-		},
-		"total": 2,
+	// Parse request parameters
+	var params ListTrainerRequest
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		jsonrpcx.WithError(r, req.ID, jsonrpcx.InvalidParams, "Invalid request parameters")
+		return
+	}
+
+	// Get current user ID to exclude from list
+	currentUserID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		jsonrpcx.WithError(r, req.ID, jsonrpcx.InvalidRequest, "User not authenticated")
+		return
+	}
+
+	var trainerSummaries []TrainerSummary
+
+	if params.OnlineOnly {
+		// Get only currently online trainers from movement broadcaster
+		h.logger.Debug("Filtering for online trainers only")
+		onlineEvents := h.movementBroadcaster.GetCurrentOnlineTrainers(r.Context())
+		
+		for _, event := range onlineEvents {
+			if event.UserID != currentUserID {
+				trainerSummaries = append(trainerSummaries, TrainerSummary{
+					ID:       event.UserID,
+					Nickname: event.Nickname,
+					Color:    event.Color,
+					Level:    1, // TODO: Get actual level from repository if needed
+					Position: map[string]int{
+						"x": int(event.Position.X),
+						"y": int(event.Position.Y),
+					},
+				})
+			}
+		}
+	} else {
+		// Get all trainers from repository (original behavior)
+		trainers, err := h.repository.GetAll(r.Context())
+		if err != nil {
+			h.logger.Error("Failed to list trainers", zap.Error(err))
+			jsonrpcx.WithError(r, req.ID, jsonrpcx.InternalError, "Failed to retrieve trainers")
+			return
+		}
+
+		// Convert to response format, excluding current user
+		for _, t := range trainers {
+			if string(t.ID) != currentUserID {
+				// Update position from movement before returning
+				t.UpdatePositionFromMovement()
+
+				trainerSummaries = append(trainerSummaries, TrainerSummary{
+					ID:       string(t.ID),
+					Nickname: t.Nickname,
+					Color:    t.Color,
+					Level:    t.Level.Value(),
+					Position: map[string]int{
+						"x": int(t.Position.X),
+						"y": int(t.Position.Y),
+					},
+				})
+			}
+		}
+	}
+
+	result := ListTrainerResponse{
+		Trainers: trainerSummaries,
+		Total:    len(trainerSummaries),
 	}
 
 	jsonrpcx.Success(w, req.ID, result)
@@ -693,3 +779,4 @@ func (h *TrainerHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *TrainerHandler) Status(w http.ResponseWriter, r *http.Request) {
 	h.HandleStatus(w, r)
 }
+

@@ -1,6 +1,8 @@
 package trainer
 
 import (
+	"math/rand"
+
 	"github.com/danghamo/life/internal/domain/shared"
 )
 
@@ -12,22 +14,12 @@ func (id UserID) String() string {
 	return string(id)
 }
 
-// Nickname represents a trainer's nickname
-type Nickname struct {
-	value string
-}
-
-// NewNickname creates a new nickname
-func NewNickname(value string) (Nickname, error) {
+// ValidateNickname validates a nickname string
+func ValidateNickname(value string) error {
 	if len(value) < 3 || len(value) > 20 {
-		return Nickname{}, shared.NewDomainError(shared.ErrCodeInvalidNickname, "Nickname must be between 3 and 20 characters")
+		return shared.NewDomainError(shared.ErrCodeInvalidNickname, "Nickname must be between 3 and 20 characters")
 	}
-	return Nickname{value: value}, nil
-}
-
-// Value returns the nickname value
-func (n Nickname) Value() string {
-	return n.value
+	return nil
 }
 
 // ItemID represents a unique item identifier
@@ -262,7 +254,8 @@ func (party *AnimalParty) Size() int {
 // Trainer represents a trainer aggregate
 type Trainer struct {
 	ID         UserID            `json:"id"` // UserID from Account domain
-	Nickname   Nickname          `json:"nickname"`
+	Nickname   string            `json:"nickname"`
+	Color      string            `json:"color"`
 	Level      shared.Level      `json:"level"`
 	Experience shared.Experience `json:"experience"`
 	Stats      shared.Stats      `json:"stats"`
@@ -275,8 +268,31 @@ type Trainer struct {
 	UpdatedAt  shared.Timestamp  `json:"updated_at"`
 }
 
+// generateRandomColor generates a random hex color from predefined palette
+func generateRandomColor() string {
+	// 50 pre-defined attractive colors for better visual distinction
+	colors := []string{
+		"#4444ff", "#ff4444", "#44ff44", "#ffaa44", "#ff44aa",
+		"#44aaff", "#aaff44", "#aa44ff", "#ffaa88", "#88aaff",
+		"#aaffaa", "#ffaabb", "#ff8844", "#44ff88", "#8844ff",
+		"#ff4488", "#88ff44", "#4488ff", "#aa8844", "#44aa88",
+		"#ff6644", "#6644ff", "#44ff66", "#ff44cc", "#cc44ff",
+		"#44ffcc", "#ffcc44", "#cc44aa", "#44ccff", "#aaccff",
+		"#ffaacc", "#ccffaa", "#aaffcc", "#ffccaa", "#ccaaff",
+		"#ff7755", "#7755ff", "#55ff77", "#ff5599", "#9955ff",
+		"#55ff99", "#ff9955", "#9955aa", "#55aaff", "#aa55ff",
+		"#ff8866", "#8866ff", "#66ff88", "#ff6699", "#9966ff",
+		"#66ff99", "#ff9966", "#9966aa", "#66aaff", "#aa66ff",
+	}
+	return colors[rand.Intn(len(colors))]
+}
+
 // NewTrainer creates a new trainer with UserID from Account domain
-func NewTrainer(userID UserID, nickname Nickname) (*Trainer, error) {
+func NewTrainer(userID UserID, nickname string) (*Trainer, error) {
+	// Validate nickname
+	if err := ValidateNickname(nickname); err != nil {
+		return nil, err
+	}
 	level, _ := shared.NewLevel(1)
 	experience, _ := shared.NewExperience(0, 0)
 	stats := shared.NewStats(100, 10, 5, 10, 10) // Starting stats
@@ -287,10 +303,12 @@ func NewTrainer(userID UserID, nickname Nickname) (*Trainer, error) {
 	inventory := NewInventory(50)                // 50 inventory slots
 	party := NewAnimalParty(6)                   // Max 6 animals
 	timestamp := shared.NewTimestamp()
+	color := generateRandomColor() // Assign random color
 
 	trainer := &Trainer{
 		ID:         userID, // Use UserID from Account domain
 		Nickname:   nickname,
+		Color:      color,
 		Level:      level,
 		Experience: experience,
 		Stats:      stats,
