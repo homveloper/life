@@ -10,6 +10,8 @@ import (
 // TrainerMovedEvent represents a domain event when a trainer moves
 type TrainerMovedEvent struct {
 	UserID    string                 `json:"user_id"`
+	Nickname  string                 `json:"nickname"`
+	Color     string                 `json:"color"`
 	Position  shared.Position        `json:"position"`
 	Movement  trainer.MovementState  `json:"movement"`
 	Timestamp time.Time              `json:"timestamp"`
@@ -20,6 +22,8 @@ type TrainerMovedEvent struct {
 // TrainerStoppedEvent represents a domain event when a trainer stops moving
 type TrainerStoppedEvent struct {
 	UserID    string                 `json:"user_id"`
+	Nickname  string                 `json:"nickname"`
+	Color     string                 `json:"color"`
 	Position  shared.Position        `json:"position"`
 	Movement  trainer.MovementState  `json:"movement"`
 	Timestamp time.Time              `json:"timestamp"`

@@ -69,6 +69,8 @@ func (h *SSEEventHandler) HandleTrainerMovedEvent(ctx context.Context, event *cq
 		Method:  "trainer.position.broadcast",
 		Params: map[string]interface{}{
 			"user_id":   event.UserID,
+			"nickname":  event.Nickname,
+			"color":     event.Color,
 			"position":  event.Position,
 			"movement":  event.Movement,
 			"timestamp": event.Timestamp.Format(time.RFC3339),
@@ -112,6 +114,8 @@ func (h *SSEEventHandler) HandleTrainerStoppedEvent(ctx context.Context, event *
 		Method:  "trainer.movement.broadcast",
 		Params: map[string]interface{}{
 			"user_id":   event.UserID,
+			"nickname":  event.Nickname,
+			"color":     event.Color,
 			"position":  event.Position,
 			"movement":  event.Movement,
 			"timestamp": event.Timestamp.Format(time.RFC3339),
@@ -141,6 +145,7 @@ func (h *SSEEventHandler) HandleTrainerCreatedEvent(ctx context.Context, event *
 		Params: map[string]interface{}{
 			"user_id":   event.UserID,
 			"nickname":  event.Trainer.Nickname,
+			"color":     event.Trainer.Color,
 			"position":  event.Trainer.Position,
 			"level":     event.Trainer.Level,
 			"timestamp": event.Timestamp.Format(time.RFC3339),

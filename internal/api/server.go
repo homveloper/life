@@ -18,6 +18,7 @@ import (
 	"github.com/danghamo/life/internal/api/handlers"
 	"github.com/danghamo/life/internal/api/jsonrpcx"
 	"github.com/danghamo/life/internal/api/middleware"
+	"github.com/danghamo/life/internal/app/service"
 	cqrshandlers "github.com/danghamo/life/internal/cqrs/handlers"
 	"github.com/danghamo/life/internal/domain/account"
 	"github.com/danghamo/life/internal/domain/trainer"
@@ -39,7 +40,8 @@ type Server struct {
 	authHandler    *handlers.AuthHandler
 	serverHandler  *handlers.ServerHandler
 	authMiddleware *middleware.AuthMiddleware
-	sseBroadcaster *sse.SSEBroadcaster
+	sseBroadcaster    *sse.SSEBroadcaster
+	movementBroadcaster *service.MovementBroadcaster
 	// Watermill CQRS components
 	commandBus       *cqrs.CommandBus
 	eventBus         *cqrs.EventBus
@@ -217,6 +219,9 @@ func NewServer(config ServerConfig, logger *logger.Logger, redisClient *redisx.C
 	// Create SSE broadcaster
 	sseBroadcaster := sse.NewSSEBroadcaster(apiLogger)
 
+	// Create movement broadcaster with Redis client
+	movementBroadcaster := service.NewMovementBroadcaster(apiLogger, trainerRepo, eventBus, redisClient.Client)
+
 	// Create event handlers
 	sseEventHandler := cqrshandlers.NewSSEEventHandler(
 		sseBroadcaster, // SSEBroadcaster interface
@@ -235,19 +240,20 @@ func NewServer(config ServerConfig, logger *logger.Logger, redisClient *redisx.C
 		logger:            apiLogger,
 		redisClient:       redisClient,
 		mux:               mux,
-		trainerHandler:    handlers.NewTrainerHandler(apiLogger, trainerRepo, eventBus),
+		trainerHandler:    handlers.NewTrainerHandler(apiLogger, trainerRepo, eventBus, movementBroadcaster),
 		animalHandler:     handlers.NewAnimalHandler(apiLogger),
 		worldHandler:      handlers.NewWorldHandler(apiLogger),
 		authHandler:       handlers.NewAuthHandler(apiLogger, accountRepo, jwtService, oauthConfig),
 		serverHandler:     handlers.NewServerHandler(),
 		authMiddleware:    authMiddleware,
-		sseBroadcaster:    sseBroadcaster,
-		commandBus:        commandBus,
-		eventBus:          eventBus,
-		commandProcessor:  commandProcessor,
-		eventProcessor:    eventProcessor,
-		router:            router,
-		sseEventHandler:   sseEventHandler,
+		sseBroadcaster:      sseBroadcaster,
+		movementBroadcaster: movementBroadcaster,
+		commandBus:          commandBus,
+		eventBus:            eventBus,
+		commandProcessor:    commandProcessor,
+		eventProcessor:      eventProcessor,
+		router:              router,
+		sseEventHandler:     sseEventHandler,
 	}
 
 	// Register only event handlers for SSE broadcasting
@@ -389,6 +395,9 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 	}()
 
+	// Start movement broadcaster
+	go s.movementBroadcaster.Start(ctx)
+
 	// Start server in goroutine
 	go func() {
 		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -406,7 +415,13 @@ func (s *Server) Start(ctx context.Context) error {
 func (s *Server) Shutdown() error {
 	s.logger.Info("Shutting down HTTP server")
 
-	// Shutdown SSE broadcaster first to close client connections
+	// Stop movement broadcaster first
+	if s.movementBroadcaster != nil {
+		s.logger.Debug("Stopping movement broadcaster")
+		s.movementBroadcaster.Stop()
+	}
+
+	// Shutdown SSE broadcaster to close client connections
 	if s.sseBroadcaster != nil {
 		s.logger.Debug("Closing SSE broadcaster")
 		s.sseBroadcaster.Close()
