@@ -202,7 +202,7 @@ func (rw *responseWriter) WriteHeader(code int) {
 	rw.ResponseWriter.WriteHeader(code)
 }
 
-// Flush implements http.Flusher interface for SSE support
+// Flush implements http.Flusher insterface for SSE support
 func (rw *responseWriter) Flush() {
 	if flusher, ok := rw.ResponseWriter.(http.Flusher); ok {
 		flusher.Flush()

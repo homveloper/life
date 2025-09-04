@@ -462,6 +462,9 @@ func (b *SSEBroadcaster) HandleSSE(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 	
 	b.logger.Debug("SSE: Initial message sent and flushed")
+	
+	// TODO: Send initial sync data (current online trainers)
+	// This will be implemented after adding MovementBroadcaster reference
 
 	// Keep connection alive
 	heartbeat := time.NewTicker(30 * time.Second)
