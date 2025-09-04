@@ -10,12 +10,12 @@ import (
 	"github.com/danghamo/life/internal/domain/shared"
 )
 
-// RedisRepository implements Repository using Redis Hash
+// RedisRepository implements Repository using Redis JSON
 type RedisRepository struct {
 	client *redis.Client
 }
 
-// NewRedisRepository creates a new Redis-based trainer repository
+// NewRedisRepository creates a new Redis JSON-based trainer repository
 func NewRedisRepository(client *redis.Client) Repository {
 	return &RedisRepository{
 		client: client,
@@ -27,17 +27,29 @@ func (r *RedisRepository) FindOneAndUpsert(ctx context.Context, id UserID, callb
 	key := fmt.Sprintf("trainer:%s", id.String())
 
 	return r.client.Watch(ctx, func(tx *redis.Tx) error {
-		// Get current trainer
+		// Get current trainer using JSON.GET
 		var current *Trainer
-		data := tx.HGetAll(ctx, key)
-		if data.Err() != nil && data.Err() != redis.Nil {
-			return data.Err()
-		}
-
-		if len(data.Val()) > 0 {
-			current = &Trainer{}
-			if err := r.deserializeTrainer(data.Val(), current); err != nil {
-				return err
+		jsonData, err := tx.JSONGet(ctx, key, "$").Result()
+		if err == redis.Nil {
+			// Key doesn't exist, current remains nil
+			current = nil
+		} else if err != nil {
+			return err
+		} else if jsonData == "" || jsonData == "null" {
+			// JSON exists but is null
+			current = nil
+		} else {
+			// Key exists, parse JSON array result
+			var jsonArray []json.RawMessage
+			if err := json.Unmarshal([]byte(jsonData), &jsonArray); err != nil {
+				return fmt.Errorf("failed to parse JSON array from Redis: %w", err)
+			}
+			
+			if len(jsonArray) > 0 {
+				current = &Trainer{}
+				if err := json.Unmarshal(jsonArray[0], current); err != nil {
+					return fmt.Errorf("failed to deserialize trainer: %w", err)
+				}
 			}
 		}
 
@@ -51,15 +63,15 @@ func (r *RedisRepository) FindOneAndUpsert(ctx context.Context, id UserID, callb
 			return nil // No changes
 		}
 
-		// Serialize and store
-		fields, err := r.serializeTrainer(result)
+		// Serialize and store using JSON.SET
+		jsonBytes, err := json.Marshal(result)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to serialize trainer: %w", err)
 		}
 
 		// Execute transaction
 		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
-			pipe.HMSet(ctx, key, fields)
+			pipe.JSONSet(ctx, key, "$", string(jsonBytes))
 
 			// Update indices
 			r.updateTrainerIndices(ctx, pipe, result)
@@ -76,13 +88,14 @@ func (r *RedisRepository) FindOneAndInsert(ctx context.Context, id UserID, callb
 	key := fmt.Sprintf("trainer:%s", id.String())
 
 	return r.client.Watch(ctx, func(tx *redis.Tx) error {
-		// Check if already exists
-		exists := tx.Exists(ctx, key)
-		if exists.Err() != nil {
-			return exists.Err()
-		}
-
-		if exists.Val() > 0 {
+		// Check if already exists using JSON.GET
+		jsonData, err := tx.JSONGet(ctx, key, "$").Result()
+		if err == redis.Nil {
+			// Key doesn't exist, proceed with insert
+		} else if err != nil {
+			return err
+		} else if jsonData != "" && jsonData != "null" {
+			// Key exists and has valid data, return error
 			return shared.ErrAlreadyExists("trainer")
 		}
 
@@ -96,15 +109,15 @@ func (r *RedisRepository) FindOneAndInsert(ctx context.Context, id UserID, callb
 			return fmt.Errorf("callback returned nil trainer")
 		}
 
-		// Serialize and store
-		fields, err := r.serializeTrainer(result)
+		// Serialize and store using JSON.SET
+		jsonBytes, err := json.Marshal(result)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to serialize trainer: %w", err)
 		}
 
 		// Execute transaction
 		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
-			pipe.HMSet(ctx, key, fields)
+			pipe.JSONSet(ctx, key, "$", string(jsonBytes))
 
 			// Update indices
 			r.updateTrainerIndices(ctx, pipe, result)
@@ -121,43 +134,57 @@ func (r *RedisRepository) FindOneAndUpdate(ctx context.Context, id UserID, callb
 	key := fmt.Sprintf("trainer:%s", id.String())
 
 	return r.client.Watch(ctx, func(tx *redis.Tx) error {
-		// Get current trainer
-		data := tx.HGetAll(ctx, key)
-		if data.Err() != nil {
-			return data.Err()
+		// Get current trainer using JSON.GET
+		jsonData, err := tx.JSONGet(ctx, key, "$").Result()
+		if err == redis.Nil {
+			return shared.ErrNotFound("trainer")
+		}
+		if err != nil {
+			return err
 		}
 
-		if len(data.Val()) == 0 {
+		// Check for null response
+		if jsonData == "" || jsonData == "null" {
+			return shared.ErrNotFound("trainer")
+		}
+
+		// Parse JSON array result
+		var jsonArray []json.RawMessage
+		if err := json.Unmarshal([]byte(jsonData), &jsonArray); err != nil {
+			return fmt.Errorf("failed to parse JSON array from Redis: %w", err)
+		}
+		
+		if len(jsonArray) == 0 {
 			return shared.ErrNotFound("trainer")
 		}
 
 		current := &Trainer{}
-		if err := r.deserializeTrainer(data.Val(), current); err != nil {
-			return err
+		if err := json.Unmarshal(jsonArray[0], current); err != nil {
+			return fmt.Errorf("failed to deserialize trainer: %w", err)
 		}
 
 		// Execute callback
-		result, err := callback(current)
+		updateResult, err := callback(current)
 		if err != nil {
 			return err
 		}
 
-		if result == nil {
+		if updateResult == nil {
 			return nil // No changes
 		}
 
-		// Serialize and store
-		fields, err := r.serializeTrainer(result)
+		// Serialize and store using JSON.SET
+		jsonBytes, err := json.Marshal(updateResult)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to serialize trainer: %w", err)
 		}
 
 		// Execute transaction
 		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
-			pipe.HMSet(ctx, key, fields)
+			pipe.JSONSet(ctx, key, "$", string(jsonBytes))
 
 			// Update indices if needed
-			r.updateTrainerIndices(ctx, pipe, result)
+			r.updateTrainerIndices(ctx, pipe, updateResult)
 
 			return nil
 		})
@@ -166,22 +193,36 @@ func (r *RedisRepository) FindOneAndUpdate(ctx context.Context, id UserID, callb
 	}, key)
 }
 
-// GetByID retrieves a trainer by UserID
+// GetByID retrieves a trainer by UserID using Redis JSON
 func (r *RedisRepository) GetByID(ctx context.Context, id UserID) (*Trainer, error) {
 	key := fmt.Sprintf("trainer:%s", id.String())
 
-	data, err := r.client.HGetAll(ctx, key).Result()
+	jsonData, err := r.client.JSONGet(ctx, key, "$").Result()
+	if err == redis.Nil {
+		return nil, nil
+	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get trainer from Redis: %w", err)
 	}
 
-	if len(data) == 0 {
+	// Check for null response
+	if jsonData == "" || jsonData == "null" {
 		return nil, nil
 	}
 
+	// Parse JSON array result
+	var jsonArray []json.RawMessage
+	if err := json.Unmarshal([]byte(jsonData), &jsonArray); err != nil {
+		return nil, fmt.Errorf("failed to parse JSON array from Redis: %w", err)
+	}
+	
+	if len(jsonArray) == 0 {
+		return nil, nil // Path doesn't exist
+	}
+
 	t := &Trainer{}
-	if err := r.deserializeTrainer(data, t); err != nil {
-		return nil, err
+	if err := json.Unmarshal(jsonArray[0], t); err != nil {
+		return nil, fmt.Errorf("failed to deserialize trainer: %w", err)
 	}
 
 	return t, nil
@@ -215,20 +256,38 @@ func (r *RedisRepository) Delete(ctx context.Context, id UserID) error {
 	key := fmt.Sprintf("trainer:%s", id.String())
 
 	return r.client.Watch(ctx, func(tx *redis.Tx) error {
-		// Get trainer for index cleanup
-		data := tx.HGetAll(ctx, key)
-		if data.Err() != nil || len(data.Val()) == 0 {
+		// Get trainer for index cleanup using JSON.GET
+		jsonData, err := tx.JSONGet(ctx, key, "$").Result()
+		if err == redis.Nil {
+			return shared.ErrNotFound("trainer")
+		}
+		if err != nil {
+			return err
+		}
+
+		// Check for null response
+		if jsonData == "" || jsonData == "null" {
+			return shared.ErrNotFound("trainer")
+		}
+
+		// Parse JSON array result
+		var jsonArray []json.RawMessage
+		if err := json.Unmarshal([]byte(jsonData), &jsonArray); err != nil {
+			return fmt.Errorf("failed to parse JSON array from Redis: %w", err)
+		}
+		
+		if len(jsonArray) == 0 {
 			return shared.ErrNotFound("trainer")
 		}
 
 		t := &Trainer{}
-		if err := r.deserializeTrainer(data.Val(), t); err != nil {
-			return err
+		if err := json.Unmarshal(jsonArray[0], t); err != nil {
+			return fmt.Errorf("failed to deserialize trainer: %w", err)
 		}
 
 		// Execute transaction
-		_, err := tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
-			pipe.Del(ctx, key)
+		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			pipe.JSONDel(ctx, key, "$")
 
 			// Clean up indices
 			r.cleanupTrainerIndices(ctx, pipe, t)
@@ -255,28 +314,6 @@ func (r *RedisRepository) FindByNickname(ctx context.Context, nickname string) (
 	return r.GetByID(ctx, UserID(id))
 }
 
-// serializeTrainer converts trainer to Redis hash fields
-func (r *RedisRepository) serializeTrainer(t *Trainer) (map[string]interface{}, error) {
-	data, err := json.Marshal(t)
-	if err != nil {
-		return nil, err
-	}
-
-	return map[string]interface{}{
-		"data": string(data),
-	}, nil
-}
-
-// deserializeTrainer converts Redis hash fields to trainer
-func (r *RedisRepository) deserializeTrainer(fields map[string]string, t *Trainer) error {
-	data, exists := fields["data"]
-	if !exists {
-		return fmt.Errorf("trainer data not found in hash")
-	}
-
-	return json.Unmarshal([]byte(data), t)
-}
-
 // updateTrainerIndices updates secondary indices
 func (r *RedisRepository) updateTrainerIndices(ctx context.Context, pipe redis.Pipeliner, t *Trainer) {
 	// Position index
@@ -284,7 +321,7 @@ func (r *RedisRepository) updateTrainerIndices(ctx context.Context, pipe redis.P
 	pipe.SAdd(ctx, positionKey, t.ID.String())
 
 	// Nickname index
-	nicknameKey := fmt.Sprintf("idx:trainer:nickname:%s", t.Nickname.Value())
+	nicknameKey := fmt.Sprintf("idx:trainer:nickname:%s", t.Nickname)
 	pipe.Set(ctx, nicknameKey, t.ID.String(), 0)
 }
 
@@ -295,6 +332,53 @@ func (r *RedisRepository) cleanupTrainerIndices(ctx context.Context, pipe redis.
 	pipe.SRem(ctx, positionKey, t.ID.String())
 
 	// Nickname index
-	nicknameKey := fmt.Sprintf("idx:trainer:nickname:%s", t.Nickname.Value())
+	nicknameKey := fmt.Sprintf("idx:trainer:nickname:%s", t.Nickname)
 	pipe.Del(ctx, nicknameKey)
+}
+
+// GetAll retrieves all trainers from Redis using JSON
+func (r *RedisRepository) GetAll(ctx context.Context) ([]*Trainer, error) {
+	// Use SCAN to get all trainer keys
+	pattern := "trainer:*"
+	iter := r.client.Scan(ctx, 0, pattern, 0).Iterator()
+	
+	var trainers []*Trainer
+	
+	for iter.Next(ctx) {
+		key := iter.Val()
+		
+		// Get trainer data using JSON.GET
+		jsonData, err := r.client.JSONGet(ctx, key, "$").Result()
+		if err != nil {
+			continue // Skip errors for individual trainers
+		}
+		
+		// Skip null responses
+		if jsonData == "" || jsonData == "null" {
+			continue // Skip null entries
+		}
+		
+		// Parse JSON array result
+		var jsonArray []json.RawMessage
+		if err := json.Unmarshal([]byte(jsonData), &jsonArray); err != nil {
+			continue // Skip malformed JSON arrays
+		}
+		
+		if len(jsonArray) == 0 {
+			continue // Skip empty arrays
+		}
+		
+		trainer := &Trainer{}
+		if err := json.Unmarshal(jsonArray[0], trainer); err != nil {
+			continue // Skip malformed entries
+		}
+		
+		trainers = append(trainers, trainer)
+	}
+	
+	if err := iter.Err(); err != nil {
+		return nil, fmt.Errorf("failed to scan trainer keys: %w", err)
+	}
+	
+	return trainers, nil
 }
