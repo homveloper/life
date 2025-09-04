@@ -28,4 +28,7 @@ type Repository interface {
 
 	// FindByNickname finds a trainer by nickname (for uniqueness checking)
 	FindByNickname(ctx context.Context, nickname string) (*Trainer, error)
+
+	// GetAll retrieves all trainers (read-only)
+	GetAll(ctx context.Context) ([]*Trainer, error)
 }

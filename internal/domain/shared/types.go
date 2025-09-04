@@ -27,7 +27,7 @@ func (id ID) IsEmpty() bool {
 
 // Position represents a 2D coordinate
 // DESIGN DECISION: Uses float64 for free-form movement (not grid-based)
-// - 1 unit = abstract game unit, independent of pixels or tiles  
+// - 1 unit = abstract game unit, independent of pixels or tiles
 // - Allows smooth movement like Position{X: 245.7, Y: 182.3}
 // - Tiles are separate concept with position and size for collision/terrain
 type Position struct {
